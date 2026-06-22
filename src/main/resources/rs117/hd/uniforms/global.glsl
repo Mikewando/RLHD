@@ -19,6 +19,12 @@ layout(std140) uniform UBOGlobal {
     float colorBlindnessIntensity;
     float glareIntensity;
     float gammaCorrection;
+    float exposure;
+    float agxMinEv;
+    float agxMaxEv;
+    float agxPunchSaturation;
+    float agxPunchPower;
+    float agxLegacyMix;
     float saturation;
 	float contrast;
     int colorFilterPrevious;

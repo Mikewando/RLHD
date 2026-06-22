@@ -4,6 +4,9 @@
 #include <uniforms/sky.glsl>
 
 #include <utils/output_transform.glsl>
+#if ZONE_RENDERER
+    #include <utils/tonemap.glsl>
+#endif
 
 in vec3 vColor;
 in float vBrightness;
@@ -11,7 +14,10 @@ in float vBrightness;
     in vec2 vUv;
 #endif
 
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
+#if ZONE_RENDERER
+    layout(location = 1) out vec4 fragTag;
+#endif
 
 void main() {
     if (!uboSky.enabled || uboGlobal.orthographicProjection || vBrightness <= 0.0)
@@ -31,8 +37,15 @@ void main() {
     float falloff = exp(-d * d * 4.4); // smooth bell, ~0 by the sprite edge (wider = softer)
 
     vec3 starColor = vColor * vBrightness * falloff * 4.0;
-    starColor = linearToSrgb(starColor);
-    starColor = applyColorAdjustments(starColor);
-    starColor = applyOutputCorrection(starColor);
-    FragColor = vec4(starColor, 0.0);
+    #if ZONE_RENDERER
+        // Additively blended into the scene-referred OKLab FBO. Adding OKLab values is only an
+        // approximation of adding light, but stars are faint and near-neutral.
+        FragColor = vec4(linearToOklab(agxInverseForDisplay(clamp(starColor, 0.0, 1.0))), 0.0);
+        fragTag = vec4(0.0);
+    #else
+        starColor = linearToSrgb(starColor);
+        starColor = applyColorAdjustments(starColor);
+        starColor = applyOutputCorrection(starColor);
+        FragColor = vec4(starColor, 0.0);
+    #endif
 }

@@ -31,6 +31,7 @@ import net.runelite.api.*;
 import net.runelite.client.callback.RenderCallbackManager;
 import rs117.hd.HdPlugin;
 import rs117.hd.scene.GamevalManager;
+import rs117.hd.scene.LightManager;
 import rs117.hd.scene.MaterialManager;
 import rs117.hd.scene.ModelOverrideManager;
 import rs117.hd.scene.ProceduralGenerator;
@@ -105,6 +106,9 @@ public class SceneUploader implements AutoCloseable {
 
 	@Inject
 	private ModelOverrideManager modelOverrideManager;
+
+	@Inject
+	private LightManager lightManager;
 
 	@Inject
 	private ProceduralGenerator proceduralGenerator;
@@ -1071,10 +1075,23 @@ public class SceneUploader implements AutoCloseable {
 		neHeight -= override.heightOffset;
 		nwHeight -= override.heightOffset;
 
-		int swMaterialData = swMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, swVertexIsOverlay);
-		int seMaterialData = seMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, seVertexIsOverlay);
-		int nwMaterialData = nwMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, nwVertexIsOverlay);
-		int neMaterialData = neMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, neVertexIsOverlay);
+		// Tile-level legacy-highlight tag. The per-material flag (bit 3 in
+		// MaterialStruct.flags) only fires when a tagged Material is actually
+		// assigned per-vertex. With configGroundTextures off, the engine's
+		// vanilla-texture path is the only assignment source — so newer vanilla
+		// overlays without a bound vanilla texture (e.g. eclipse moon overlay
+		// 334) stay at Material.NONE and miss the flag. Deriving the flag from
+		// the override's groundMaterial closes that gap: any tile pointing at a
+		// lava-flagged groundMaterial (e.g. HD_LAVA) gets the tag regardless of
+		// which Material the engine ends up rendering. Goes through the bit 21
+		// (vibrance-scaled) path same as attached-light objects.
+		final int tileMaterialDataExtraBits =
+			(override.groundMaterial != null && override.groundMaterial.legacyHighlightClip)
+				? Material.MATERIAL_FLAG_HAS_ATTACHED_LIGHT : 0;
+		int swMaterialData = swMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, swVertexIsOverlay) | tileMaterialDataExtraBits;
+		int seMaterialData = seMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, seVertexIsOverlay) | tileMaterialDataExtraBits;
+		int nwMaterialData = nwMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, nwVertexIsOverlay) | tileMaterialDataExtraBits;
+		int neMaterialData = neMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, neVertexIsOverlay) | tileMaterialDataExtraBits;
 
 		float uvcos = -uvScale, uvsin = 0;
 		if (uvOrientation % 2048 != 0) {
@@ -1430,9 +1447,13 @@ public class SceneUploader implements AutoCloseable {
 			ly1 -= override.heightOffset;
 			ly2 -= override.heightOffset;
 
-			int materialDataA = materialA.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexAIsOverlay);
-			int materialDataB = materialB.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexBIsOverlay);
-			int materialDataC = materialC.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexCIsOverlay);
+			// See uploadTilePaint for the rationale on this bit.
+			final int tileMaterialDataExtraBits =
+				(override.groundMaterial != null && override.groundMaterial.legacyHighlightClip)
+					? Material.MATERIAL_FLAG_HAS_ATTACHED_LIGHT : 0;
+			int materialDataA = materialA.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexAIsOverlay) | tileMaterialDataExtraBits;
+			int materialDataB = materialB.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexBIsOverlay) | tileMaterialDataExtraBits;
+			int materialDataC = materialC.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexCIsOverlay) | tileMaterialDataExtraBits;
 
 			float uvcos = -uvScale, uvsin = 0;
 			if (uvOrientation % 2048 != 0) {
@@ -1533,6 +1554,16 @@ public class SceneUploader implements AutoCloseable {
 			writeCache = new VertexWriteCache.Collection();
 		writeCache.setOutputBuffers(opaqueBuffer, alphaBuffer, textureBuffer);
 
+		// Auto-tag fragments for AgX surface vibrance compensation if the object
+		// has an attached light in lights.json, OR if the resolved ModelOverride
+		// has legacyHighlightClip=true (for objects like LAVABUBBLES that aren't
+		// rendered with a flagged material). Computed once per model — the bit is
+		// then OR'd into each face's materialData below.
+		final int materialDataExtraBits =
+			(lightManager.hasAttachedLight(uuid) || modelOverride.legacyHighlightClip)
+				? Material.MATERIAL_FLAG_HAS_ATTACHED_LIGHT : 0;
+
+		final int[][][] tileHeights = ctx.scene.getTileHeights();
 		final int faceCount = model.getFaceCount();
 		final int vertexCount = model.getVerticesCount();
 
@@ -1795,7 +1826,7 @@ public class SceneUploader implements AutoCloseable {
 			if (uvType == UvType.VANILLA && (textureId == -1 || textureFace == -1))
 				uvType = UvType.GEOMETRY;
 
-			final int materialData = material.packMaterialData(faceOverride, uvType, false);
+			final int materialData = material.packMaterialData(faceOverride, uvType, false) | materialDataExtraBits;
 
 			final float[] faceUVs;
 			if (uvType == UvType.VANILLA) {
@@ -2162,6 +2193,7 @@ public class SceneUploader implements AutoCloseable {
 
 	// temp draw
 	public void uploadTempModel(
+		int uuid,
 		PrimitiveCharArray faces,
 		Model model,
 		ModelOverride modelOverride,
@@ -2200,6 +2232,13 @@ public class SceneUploader implements AutoCloseable {
 			model.getVertexNormalsX() != null &&
 			model.getVertexNormalsY() != null &&
 			model.getVertexNormalsZ() != null;
+
+		// Auto-tag fragments for AgX surface vibrance compensation if the
+		// renderable has an attached light in lights.json OR the resolved
+		// ModelOverride has legacyHighlightClip=true. Mirrors uploadStaticModel.
+		final int materialDataExtraBits =
+			(lightManager.hasAttachedLight(uuid) || modelOverride.legacyHighlightClip)
+				? Material.MATERIAL_FLAG_HAS_ATTACHED_LIGHT : 0;
 
 		final byte overrideAmount = model.getOverrideAmount();
 		final byte overrideHue = model.getOverrideHue();
@@ -2247,7 +2286,7 @@ public class SceneUploader implements AutoCloseable {
 				color3 = faceOverride.modifyColor(color3);
 			}
 
-			final int materialData = material.packMaterialData(faceOverride, uvType, false);
+			final int materialData = material.packMaterialData(faceOverride, uvType, false) | materialDataExtraBits;
 
 			final int triangleA = indices1[face];
 			final int vertexOffsetA = triangleA * 3;

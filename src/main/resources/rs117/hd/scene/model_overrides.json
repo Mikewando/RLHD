@@ -6486,8 +6486,14 @@
     "description": "LAVABUBBLES",
     "baseMaterial": "GRAY_110",
     "upwardsNormals": true,
+    "legacyHighlightClip": true,
     "objectIds": [
-      "LAVABUBBLES"
+      "LAVABUBBLES",
+      "LAVABUBBLES_LARGE",
+      "RC_ZMI_LAVABUBBLES",
+      "RC_ZMI_LAVABUBBLES_LARGE",
+      "RAIDS_LAVABUBBLES",
+      "RAIDS_LAVABUBBLES_LARGE"
     ]
   },
   {
@@ -21815,6 +21821,26 @@
   {
     "description": "Wilderness - Lava Pool Edges - Darker",
     "baseMaterial": "NONE",
+    "legacyHighlightClip": true,
+    "objectIds": [
+      "WILD_FALLOFF_10",
+      "WILD_FALLOFF_12",
+      "WILD_FALLOFF_11",
+      "WILD_FALLOFF3",
+      "WILD_FALLOFF5",
+      "WILD_FALLOFF1",
+      "WILD_FALLOFF9",
+      "WILD_FALLOFF4",
+      "WILD_FALLOFF8",
+      "WILD_FALLOFF2",
+      "WILD_FALLOFF7",
+      "WILD_FALLOFF6"
+    ]
+  },
+  {
+    "description": "Wilderness - Lava Pool Edges - Darker",
+    "baseMaterial": "NONE",
+    "legacyHighlightClip": true,
     "areas": [ "WILDERNESS" ],
     "objectIds": [
       "WILD_FALLOFF_10",
@@ -21843,6 +21869,7 @@
   {
     "description": "Wilderness - Lava Pool Edges - Lighter",
     "baseMaterial": "NONE",
+    "legacyHighlightClip": true,
     "areas": [ "Wilderness - Lava Pool Edges - Lighter" ],
     "objectIds": [
       "WILD_FALLOFF_10",
@@ -46668,6 +46695,7 @@
     "description": "Perilous Moons - Dragon Head Wall Fountains",
     "baseMaterial": "ROCK_3",
     "uvType": "BOX",
+    "legacyHighlightClip": true,
     "objectIds": [
       "ROR_TEMPLE_WATERFALL01",
       "ROR_TEMPLE_WATERFALL01_ODD01",
@@ -46705,6 +46733,31 @@
         "uvType": "BOX",
         "uvScale": 0.85
       }
+    ]
+  },
+  {
+    "description": "Perilous Moons - Lava Rocks",
+    "baseMaterial": "ROCK_3",
+    "uvType": "BOX",
+    "uvScale": 0.86,
+    "legacyHighlightClip": true,
+    "objectIds": [
+      "ROCK_LAVA01_LARGE01",
+      "ROCK_LAVA01_LARGE02",
+      "ROCK_LAVA01_LARGE03",
+      "ROCK_LAVA01_MEDIUM01",
+      "ROCK_LAVA01_MEDIUM02",
+      "ROCK_LAVA01_MEDIUM03",
+      "ROCK_LAVA01_SMALL01",
+      "ROCK_LAVA01_SMALL02",
+      "ROCK_LAVA02_LARGE01",
+      "ROCK_LAVA02_LARGE02",
+      "ROCK_LAVA02_LARGE03",
+      "ROCK_LAVA02_MEDIUM01",
+      "ROCK_LAVA02_MEDIUM02",
+      "ROCK_LAVA02_MEDIUM03",
+      "ROCK_LAVA02_SMALL01",
+      "ROCK_LAVA02_SMALL02"
     ]
   },
   {
@@ -46804,14 +46857,6 @@
       "PMOON_TEMPLE_MOSS01_TALL",
       "PMOON_TEMPLE_MOSS02_TALL",
       "PMOON_TEMPLE_MOSS03_TALL",
-      "ROCK_LAVA01_LARGE01",
-      "ROCK_LAVA01_LARGE02",
-      "ROCK_LAVA01_LARGE03",
-      "ROCK_LAVA01_MEDIUM01",
-      "ROCK_LAVA01_MEDIUM02",
-      "ROCK_LAVA01_MEDIUM03",
-      "ROCK_LAVA01_SMALL01",
-      "ROCK_LAVA01_SMALL02",
       "ROR_RUBBLE01_LARGE01",
       "ROR_RUBBLE01_MEDIUM01",
       "ROR_RUBBLE01_SMALL01",

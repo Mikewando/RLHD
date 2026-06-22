@@ -22,18 +22,25 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#pragma once
+
 #include <uniforms/global.glsl>
 #include <uniforms/sky.glsl>
 #include <uniforms/materials.glsl>
 #include <uniforms/water_types.glsl>
 
 #include <utils/constants.glsl>
+#include <utils/color_utils.glsl>
 #include <utils/lights.glsl>
 #include <utils/misc.glsl>
 
+// Included outside the renderer-specific guard below: includes are expanded before the
+// GLSL preprocessor runs, so #pragma once would otherwise hide it from the other water file.
 #if WATER_PASS || LEGACY_RENDERER
-
 #include <utils/sky_sampling.glsl>
+#endif
+
+#if WATER_PASS && !LEGACY_RENDERER
 
 vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     WaterType waterType = getWaterType(waterTypeIndex);
@@ -301,11 +308,22 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     return water;
 }
 
-#endif // WATER_PASS || LEGACY_RENDERER
+#endif // WATER_PASS && !LEGACY_RENDERER
+
+#if !LEGACY_RENDERER
 
 void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals) {
-    // underwater terrain
-    float lowestColorLevel = 500;
+    // outputColor comes in already sRGB-encoded (scene_frag wraps it before calling
+    // us, matching legacy). Multiply directly in that space — wrapping again would
+    // double-encode and produce a different mix shape than legacy.
+    // lowestColorLevel widened from legacy's 500 → 1000 so the underwater fill
+    // doesn't fully reach black within the visible WATER tile depths (max ≈ 759).
+    // The old 500 was obviously too low under the OKLab scene blend (the fade hit
+    // black mid-tile). The sRGB-blend switch made it less obvious but introduced a
+    // weird magenta tint in the deep section because the per-channel mix toward
+    // vec3(0) crossed through unbalanced channel ratios. Widening the range keeps a
+    // uniform depthColor wash across the open-water portion instead of fading.
+    float lowestColorLevel = 1000;
     float midColorLevel = 150;
     float surfaceLevel = IN.position.y - depth; // e.g. -1600
 
@@ -337,3 +355,4 @@ void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, 
         outputColor.rgb *= 1 + caustics * causticsColor * depthMultiplier * lightDotNormals * uboGlobal.lightStrength;
     }
 }
+#endif // !LEGACY_RENDERER

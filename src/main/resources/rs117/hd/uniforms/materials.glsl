@@ -12,7 +12,7 @@ struct Material {
     int ambientOcclusionMap;
     int flowMap;
     int shadowAlphaMap;
-    int flags; // overrideBaseColor << 2 | unlit << 1 | hasTransparency
+    int flags; // legacyHighlightClip << 3 | overrideBaseColor << 2 | unlit << 1 | hasTransparency
     float subsurface;
     float brightness;
     float displacementScale;
@@ -40,4 +40,9 @@ int getMaterialIsUnlit(const Material material) {
 
 bool getMaterialHasTransparency(const Material material) {
     return (material.flags & 1) == 1;
+}
+
+// int (not bool) so callers can plug the result into vec3() per-channel blends, e.g. dot(IN.texBlend, vec3(...)) — matches getMaterialIsUnlit.
+int getMaterialIsLegacyClip(const Material material) {
+    return material.flags >> 3 & 1;
 }

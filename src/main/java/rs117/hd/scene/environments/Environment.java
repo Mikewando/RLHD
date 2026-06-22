@@ -96,6 +96,7 @@ public class Environment {
 	private SkyConfiguration sky;
 	public boolean hideVanillaSkyboxes = false;
 	public float nightExposure = 1;
+	public float legacyHighlightMix = 0;
 
 	public transient boolean hasWaterColorOverride;
 	public transient boolean hasFogColorOverride;
@@ -211,6 +212,7 @@ public class Environment {
 		windSpeed = mix(from.windSpeed, to.windSpeed, t);
 		windStrength = mix(from.windStrength, to.windStrength, t);
 		windCeiling = mix(from.windCeiling, to.windCeiling, t);
+		legacyHighlightMix = mix(from.legacyHighlightMix, to.legacyHighlightMix, t);
 		sky = t == 1 ? to.sky : from.sky;
 		return this;
 	}

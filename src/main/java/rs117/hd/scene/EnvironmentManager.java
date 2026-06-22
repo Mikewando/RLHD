@@ -350,6 +350,8 @@ public class EnvironmentManager {
 		state.to.groundFogStart = areaEnvironment.groundFogStart;
 		state.to.groundFogEnd = areaEnvironment.groundFogEnd;
 		state.to.groundFogOpacity = areaEnvironment.groundFogOpacity;
+		// Legacy-highlight mix follows the area, not the (possibly overworld) lighting environment
+		state.to.legacyHighlightMix = areaEnvironment.legacyHighlightMix;
 		lightningEnabled = areaEnvironment.lightningEffects;
 
 		copyTo(state.to.getShadowAngles(), areaEnvironment.getShadowAngles());

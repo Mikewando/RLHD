@@ -373,25 +373,85 @@ public interface HdPluginConfig extends Config
 		return Contrast.DEFAULT;
 	}
 
-	String KEY_BRIGHTNESS = "screenBrightness";
-	@Range(
-		min = 25,
-		max = 400
-	)
+	String KEY_TONEMAP_EXPOSURE = "tonemapExposure";
+	@Range(min = 5, max = 200)
 	@Units(Units.PERCENT)
 	@ConfigItem(
-		keyName = KEY_BRIGHTNESS,
-		name = "Brightness",
+		keyName = KEY_TONEMAP_EXPOSURE,
+		name = "Tonemap exposure",
 		description =
-			"Controls the brightness of the game, excluding the UI.<br>" +
-			"Adjust until the circle on the left is barely visible.",
+			"Pre-tonemap exposure multiplier for the zone renderer.<br>" +
+			"100% is no change; lower darkens, higher brightens.<br>" +
+			"AgX rolls off highlights, so very bright surfaces won't clip.",
 		position = 19,
 		section = generalSettings
 	)
-	default int brightness() {
-		return 100;
+	default int tonemapExposure() {
+		return 45;
 	}
 
+	String KEY_AGX_MIN_EV = "agxMinEv";
+	@Range(min = -20, max = 0)
+	@ConfigItem(
+		keyName = KEY_AGX_MIN_EV,
+		name = "AgX min EV",
+		description =
+			"Lower bound of the AgX log-space input range, in stops.<br>" +
+			"More negative extends shadow detail.",
+		position = 19,
+		section = generalSettings
+	)
+	default int agxMinEv() {
+		return -10;
+	}
+
+	String KEY_AGX_MAX_EV = "agxMaxEv";
+	@Range(min = 0, max = 10)
+	@ConfigItem(
+		keyName = KEY_AGX_MAX_EV,
+		name = "AgX max EV",
+		description =
+			"Upper bound of the AgX log-space input range, in stops.<br>" +
+			"Higher dims mids/brights and adds highlight headroom.",
+		position = 20,
+		section = generalSettings
+	)
+	default int agxMaxEv() {
+		return 4;
+	}
+
+	String KEY_AGX_PUNCH_SATURATION = "agxPunchSaturation";
+	@Range(min = 1, max = 200)
+	@Units(Units.PERCENT)
+	@ConfigItem(
+		keyName = KEY_AGX_PUNCH_SATURATION,
+		name = "AgX punch saturation",
+		description =
+			"Luma-based saturation applied inside AgX after the sigmoid, in linear space.<br>" +
+			"100% is no-op.<br>" +
+			"Distinct from the post-tonemap Saturation knob, which operates in sRGB/HSV.",
+		position = 21,
+		section = generalSettings
+	)
+	default int agxPunchSaturation() {
+		return 105;
+	}
+
+	String KEY_AGX_PUNCH_POWER = "agxPunchPower";
+	@Range(min = 50, max = 200)
+	@Units(Units.PERCENT)
+	@ConfigItem(
+		keyName = KEY_AGX_PUNCH_POWER,
+		name = "AgX punch power",
+		description =
+			"Per-channel power curve applied inside AgX after the sigmoid, in linear space.<br>" +
+			"100% is no-op; higher = punchier contrast.",
+		position = 22,
+		section = generalSettings
+	)
+	default int agxPunchPower() {
+		return 108;
+	}
 
 	/*====== Shadow settings ======*/
 
@@ -1195,6 +1255,25 @@ public interface HdPluginConfig extends Config
 	)
 	String legacySettings = "legacySettings";
 
+	// Keeps the legacy "screenBrightness" storage key so existing users' saved value
+	// carries over after the rename from "Brightness" → "Legacy renderer gamma".
+	String KEY_LEGACY_RENDERER_GAMMA = "screenBrightness";
+	@Range(min = 25, max = 400)
+	@Units(Units.PERCENT)
+	@ConfigItem(
+		keyName = KEY_LEGACY_RENDERER_GAMMA,
+		name = "Legacy gamma",
+		description =
+			"Gamma correction applied to the legacy renderer's output.<br>" +
+			"Adjust until the calibration overlay's circle is barely visible. " +
+			"Has no effect when the new (zone) renderer is active.",
+		section = legacySettings,
+		position = -97
+	)
+	default int legacyRendererGamma() {
+		return 100;
+	}
+
 	String KEY_LEGACY_RENDERER = "legacyRenderer2";
 	@ConfigItem(
 		keyName = KEY_LEGACY_RENDERER,
@@ -1243,7 +1322,7 @@ public interface HdPluginConfig extends Config
 		description =
 			"The maximum draw distance for shadows.<br>" +
 			"Shorter distances result in higher quality shadows.",
-		position = -97,
+		position = -96,
 		section = legacySettings
 	)
 	@Units(" tiles")

@@ -63,6 +63,7 @@ import rs117.hd.scene.environments.Environment;
 import rs117.hd.scene.lights.Light;
 import rs117.hd.scene.model_overrides.ModelOverride;
 import rs117.hd.utils.Camera;
+import rs117.hd.utils.ColorUtils;
 import rs117.hd.utils.CommandBuffer;
 import rs117.hd.utils.HDUtils;
 import rs117.hd.utils.Mat4;
@@ -443,6 +444,7 @@ public class ZoneRenderer implements Renderer {
 				if (skybox != null) {
 					skybox.calculateBoundsCylinder();
 					modelStreamingManager.uploadTempModel(
+						0,
 						ctx,
 						sceneCamera,
 						null,
@@ -679,6 +681,12 @@ public class ZoneRenderer implements Renderer {
 		plugin.uboGlobal.glareIntensity.set(config.glareIntensity() / 100f);
 
 		plugin.uboGlobal.gammaCorrection.set(plugin.getGammaCorrection());
+		plugin.uboGlobal.exposure.set(plugin.getExposure());
+		plugin.uboGlobal.agxMinEv.set((float) config.agxMinEv());
+		plugin.uboGlobal.agxMaxEv.set((float) config.agxMaxEv());
+		plugin.uboGlobal.agxPunchSaturation.set(config.agxPunchSaturation() / 100f);
+		plugin.uboGlobal.agxPunchPower.set(config.agxPunchPower() / 100f);
+		plugin.uboGlobal.agxLegacyMix.set(env.legacyHighlightMix);
 
 		plugin.uboGlobal.underglowStrength.set(env.underglowStrength);
 		plugin.uboGlobal.underglowColor.set(env.getUnderglowColor());
@@ -942,7 +950,64 @@ public class ZoneRenderer implements Renderer {
 			renderState.ido.set(indirectDrawCmds.id);
 		renderState.apply();
 
-		skyRenderer.clear(shouldRenderVanillaSkybox);
+		// Draw to both color attachments: 0 = OKLab scene color, 1 = tagged-glow R8 mask.
+		// scene_frag writes FragColor (location 0) and fragTag (location 1); both are alpha-blended
+		// with outputColor.a so the tag accumulates the alpha-weighted tagged contribution per pixel.
+		glDrawBuffers(new int[] { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 });
+
+		// Clear scene. SkyRenderer.clear can't be used here, since it clears with an sRGB
+		// color that would land in both attachments. When the procedural sky renders, it
+		// overwrites every background pixel itself (OKLab + zero tag, see sky_frag), so the
+		// fog clear below only matters when the sky shader is unavailable.
+		frameTimer.begin(Timer.CLEAR_SCENE);
+		// Background pixels should display at the per-environment fogColor visual.
+		// Inverse-AgX gives us the HDR scene-referred value that, when run through the
+		// tonemap with the current EV range and exposure, produces that target on-screen.
+		// FBO stores OKLab, so encode the HDR sky as OKLab for the clear color.
+		// Use glClearBufferfv (not glClearColor) so the OKLab values — which
+		// can exceed [0,1] in L and be negative in a/b — aren't clamped before
+		// reaching the RGBA16F framebuffer.
+		float[] clearOklab = { 0, 0, 0 };
+		if (!shouldRenderVanillaSkybox && !skyRenderer.shouldRender(false)) {
+			float[] fogColor = environmentManager.getCurrentEnvironment().getFogColor();
+			float minEv = (float) config.agxMinEv();
+			float maxEv = (float) config.agxMaxEv();
+			float exp = plugin.getExposure();
+			float[] hdrSkyAgx = ColorUtils.agxInverseToHdrInput(
+				fogColor,
+				minEv, maxEv, exp,
+				config.agxPunchSaturation() / 100f,
+				config.agxPunchPower() / 100f
+			);
+			// In environments with agxLegacyMix > 0 the tonemap_frag overwrites
+			// agxOut with the legacy-target transform, so the AgX-based inverse
+			// no longer produces the authored fog color. Lerp toward the
+			// legacy-target inverse by the same mix so sky matches in both
+			// regimes (exact at mix=0 and mix=1; approximate in between, which
+			// is acceptable per the per-environment design).
+			float mix = environmentManager.getCurrentEnvironment().legacyHighlightMix;
+			float[] hdrSky;
+			if (mix <= 0) {
+				hdrSky = hdrSkyAgx;
+			} else {
+				float[] hdrSkyLegacy = ColorUtils.agxLegacyInverseToHdrInput(
+					fogColor,
+					minEv, maxEv, exp
+				);
+				hdrSky = new float[] {
+					hdrSkyAgx[0] + (hdrSkyLegacy[0] - hdrSkyAgx[0]) * mix,
+					hdrSkyAgx[1] + (hdrSkyLegacy[1] - hdrSkyAgx[1]) * mix,
+					hdrSkyAgx[2] + (hdrSkyLegacy[2] - hdrSkyAgx[2]) * mix,
+				};
+			}
+			clearOklab = ColorUtils.linearToOklab(hdrSky);
+		}
+		glClearBufferfv(GL_COLOR, 0, new float[] { clearOklab[0], clearOklab[1], clearOklab[2], 1f });
+		// Tag attachment starts at zero (no tagged contribution).
+		glClearBufferfv(GL_COLOR, 1, new float[] { 0f, 0f, 0f, 0f });
+		glClearDepth(0);
+		glClear(GL_DEPTH_BUFFER_BIT);
+		frameTimer.end(Timer.CLEAR_SCENE);
 
 		frameTimer.begin(Timer.RENDER_SCENE_AND_SKY);
 
@@ -1321,41 +1386,44 @@ public class ZoneRenderer implements Renderer {
 			}
 
 			if (sceneFboValid && plugin.sceneResolution != null && plugin.sceneViewport != null) {
+				// Required: scenePass() does not leave any read-framebuffer binding in place
 				glBindFramebuffer(GL_READ_FRAMEBUFFER, plugin.fboScene);
-				if (plugin.fboSceneResolve != 0) {
-					// Blit from the scene FBO to the multisample resolve FBO
-					glBindFramebuffer(GL_DRAW_FRAMEBUFFER, plugin.fboSceneResolve);
+				// Blit color attachment 0 (OKLab scene) + depth from the scene FBO to the resolve FBO.
+				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, plugin.fboSceneResolve);
+				glReadBuffer(GL_COLOR_ATTACHMENT0);
+				glDrawBuffers(new int[] { GL_COLOR_ATTACHMENT0 });
+				glBlitFramebuffer(
+					0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
+					0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
+					GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST
+				);
+
+				// Second blit for attachment 1 (R8 tagged-glow mask). glBlitFramebuffer
+				// resolves whichever attachment is selected by glReadBuffer / glDrawBuffers
+				// per call, so the tag mask needs its own blit.
+				if (plugin.texSceneTagResolve != 0) {
+					glReadBuffer(GL_COLOR_ATTACHMENT1);
+					glDrawBuffers(new int[] { GL_COLOR_ATTACHMENT1 });
 					glBlitFramebuffer(
 						0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
 						0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
 						GL_COLOR_BUFFER_BIT, GL_NEAREST
 					);
-					glBindFramebuffer(GL_READ_FRAMEBUFFER, plugin.fboSceneResolve);
+					// Restore default draw buffer mapping for any subsequent draw operations.
+					glDrawBuffers(new int[] { GL_COLOR_ATTACHMENT0 });
 				}
-
-				// Blit from the resolved FBO to the default FBO
-				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, plugin.awtContext.getFramebuffer(false));
 
 				if (APPLE && !client.isResized()) {
 					// On macOS, we need to ensure that the alpha channel is opaque to prevent whatever
-					// is beneath from leaking through. In fixed mode, the MSAA resolve alone is not
-					// sufficient, since the viewport only covers part of the screen.
+					// is beneath from leaking through. In fixed mode, the tonemap pass only covers
+					// the scene viewport, not the full default framebuffer.
+					glBindFramebuffer(GL_DRAW_FRAMEBUFFER, plugin.awtContext.getFramebuffer(false));
 					glClearColor(0, 0, 0, 1);
 					glClear(GL_COLOR_BUFFER_BIT);
 				}
 
-				glBlitFramebuffer(
-					0,
-					0,
-					plugin.sceneResolution[0],
-					plugin.sceneResolution[1],
-					plugin.sceneViewport[0],
-					plugin.sceneViewport[1],
-					plugin.sceneViewport[0] + plugin.sceneViewport[2],
-					plugin.sceneViewport[1] + plugin.sceneViewport[3],
-					GL_COLOR_BUFFER_BIT,
-					config.sceneScalingMode().glFilter
-				);
+				// Tonemap pass: sample fboSceneResolve, write to default FBO
+				plugin.runTonemapPass();
 			} else {
 				glBindFramebuffer(GL_FRAMEBUFFER, plugin.awtContext.getFramebuffer(false));
 				glClearColor(0, 0, 0, 1);

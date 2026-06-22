@@ -260,6 +260,7 @@ public class ModelStreamingManager {
 		if (asyncModelCache != null) {
 			// Fast path, buffer the model into the job queue to unblock rl internals
 			asyncModelCache.queue(
+				uuid,
 				ctx,
 				projection,
 				tileObject,
@@ -278,6 +279,7 @@ public class ModelStreamingManager {
 		}
 
 		uploadTempModel(
+			uuid,
 			ctx,
 			projection,
 			tileObject,
@@ -295,6 +297,7 @@ public class ModelStreamingManager {
 	}
 
 	private void uploadTempModelAsync(
+		int uuid,
 		WorldViewContext ctx,
 		Projection projection,
 		TileObject tileObject,
@@ -310,6 +313,7 @@ public class ModelStreamingManager {
 	) {
 		final long t = System.nanoTime();
 		uploadTempModel(
+			uuid,
 			ctx,
 			projection,
 			tileObject,
@@ -328,6 +332,7 @@ public class ModelStreamingManager {
 	}
 
 	public void uploadTempModel(
+		int uuid,
 		WorldViewContext ctx,
 		Projection projection,
 		@Nullable TileObject tileObject,
@@ -392,6 +397,7 @@ public class ModelStreamingManager {
 			) {
 				final DynamicModelVAO.View shadowView = ctx.beginDraw(VAO_SHADOW, culledFaces.length);
 				sceneUploader.uploadTempModel(
+					uuid,
 					culledFaces,
 					m,
 					modelOverride,
@@ -418,6 +424,7 @@ public class ModelStreamingManager {
 				final DynamicModelVAO.View alphaView = alphaFaceCount > 0 ? ctx.beginDraw(VAO_ALPHA, alphaFaceCount) : opaqueView;
 
 				sceneUploader.uploadTempModel(
+					uuid,
 					visibleFaces,
 					m,
 					modelOverride,

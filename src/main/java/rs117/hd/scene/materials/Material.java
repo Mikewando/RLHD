@@ -59,6 +59,7 @@ public class Material {
 	private boolean seasonalFoliage;
 	private boolean overrideBaseColor;
 	private boolean unlit;
+	public boolean legacyHighlightClip;
 	@JsonAdapter(ColorUtils.LinearAdapter.class)
 	public float brightness = 1;
 	public float subsurface;
@@ -79,7 +80,14 @@ public class Material {
 	public transient boolean isFallbackVanillaMaterial;
 	public transient boolean isValid = true;
 
-	public static final int MAX_MATERIAL_INDEX = (1 << 12) - 1;
+	public static final int MAX_MATERIAL_INDEX = (1 << 10) - 1;
+	// Mirror of MATERIAL_FLAG_HAS_ATTACHED_LIGHT in constants.glsl. Set on
+	// per-face materialData ints from three sources (see docs/agx-legacy-mix.md):
+	// lights.json auto-tagging, ModelOverride.legacyHighlightClip, and tile
+	// uploads whose GroundMaterial has any legacyHighlightClip member material.
+	// Drives the per-fragment legacy-clip tag attachment that tonemap_frag
+	// samples to mix toward the legacy hue.
+	public static final int MATERIAL_FLAG_HAS_ATTACHED_LIGHT = 1 << 21;
 	public static final Material NONE = new Material().name("NONE");
 	public static final Material UNLIT = new Material().name("UNLIT").parent(NONE).unlit(true);
 	public static final Material[] REQUIRED_MATERIALS = { NONE, UNLIT };
@@ -185,7 +193,7 @@ public class Material {
 		assert isValid : String.format("Material %s used after invalidation", this);
 		int materialIndex = uboIndex;
 		assert materialIndex <= MAX_MATERIAL_INDEX;
-		return (materialIndex & MAX_MATERIAL_INDEX) << 21
+		return (materialIndex & MAX_MATERIAL_INDEX) << 22
 			   | ((int) (modelOverride.shadowOpacityThreshold * 0x3F) & 0x3F) << 15
 			   | ((modelOverride.windDisplacementModifier + 3) & 0x7) << 12
 			   | (modelOverride.windDisplacementMode.ordinal() & 0x7) << 9
@@ -216,6 +224,7 @@ public class Material {
 		struct.flowMap.set(getTextureLayer(flowMap));
 		struct.shadowAlphaMap.set(getTextureLayer(shadowAlphaMap));
 		struct.flags.set(
+			(legacyHighlightClip ? 1 : 0) << 3 |
 			(overrideBaseColor ? 1 : 0) << 2 |
 			(unlit ? 1 : 0) << 1 |
 			(hasTransparency ? 1 : 0)

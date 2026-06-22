@@ -15,7 +15,11 @@
 
 // Any changes here may need to be reflected in OpenCL's constants.cl
 // They are kept separate to avoid accidentally breaking OpenCL compatibility
-#define MATERIAL_INDEX_SHIFT 21
+#define MATERIAL_INDEX_SHIFT 22
+// Auto-tag for objects with an attached light in lights.json (plus
+// ModelOverride/GroundMaterial legacyHighlightClip), which drives AgX surface
+// vibrance. Lives just below the material index since bits 0-20 are all taken.
+#define MATERIAL_FLAG_HAS_ATTACHED_LIGHT 21
 #define MATERIAL_INDEX_MASK ((1 << (32 - MATERIAL_INDEX_SHIFT)) - 1)
 #define MATERIAL_SHADOW_OPACITY_THRESHOLD_SHIFT 15
 #define MATERIAL_FLAG_WIND_MODIFIER 12
