@@ -8,6 +8,11 @@ layout(std140) uniform UBOGlobal {
 
     float colorBlindnessIntensity;
     float gammaCorrection;
+    float exposure;
+    float agxMinEv;
+    float agxMaxEv;
+    float agxPunchSaturation;
+    float agxPunchPower;
     float saturation;
 	float contrast;
     int colorFilterPrevious;
@@ -27,6 +32,7 @@ layout(std140) uniform UBOGlobal {
     int useFog;
     float fogDepth;
     vec3 fogColor;
+    vec3 skyColor;
     float groundFogStart;
     float groundFogEnd;
     float groundFogOpacity;

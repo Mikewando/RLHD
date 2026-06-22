@@ -55,7 +55,7 @@ public class GammaCalibrationOverlay extends ShaderOverlay<GammaCalibrationOverl
 	public void onConfigChanged(ConfigChanged event) {
 		// Try showing the overlay only in response to manually changing the brightness setting
 		if (event.getGroup().equals(CONFIG_GROUP) &&
-			event.getKey().equals(KEY_BRIGHTNESS) &&
+			event.getKey().equals(KEY_LEGACY_RENDERER_GAMMA) &&
 			event.getOldValue() != null &&
 			SwingUtilities.isEventDispatchThread())
 			brightnessChangedAt = System.currentTimeMillis();

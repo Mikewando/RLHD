@@ -1011,6 +1011,9 @@ public class LegacyRenderer implements Renderer {
 			float lightBrightnessMultiplier = 0.8f;
 			float midBrightnessMultiplier = 0.45f;
 			float darkBrightnessMultiplier = 0.05f;
+			// Legacy is frozen: keep the linearToSrgb wrap that the legacy water shader
+			// has always been tuned around. ZoneRenderer uploads its own (un-wrapped)
+			// values when active, so this only affects legacy's view of the UBO.
 			float[] waterColorLight = ColorUtils.linearToSrgb(ColorUtils.hsvToSrgb(new float[] {
 				waterColorHsv[0],
 				waterColorHsv[1],

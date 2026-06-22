@@ -88,6 +88,7 @@ import rs117.hd.config.VanillaShadowMode;
 import rs117.hd.opengl.shader.ShaderException;
 import rs117.hd.opengl.shader.ShaderIncludes;
 import rs117.hd.opengl.shader.TiledLightingShaderProgram;
+import rs117.hd.opengl.shader.TonemapShaderProgram;
 import rs117.hd.opengl.shader.UIShaderProgram;
 import rs117.hd.opengl.uniforms.UBOCompute;
 import rs117.hd.opengl.uniforms.UBOGlobal;
@@ -171,6 +172,8 @@ public class HdPlugin extends Plugin {
 	public static final int TEXTURE_UNIT_SHADOW_MAP = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_TILE_HEIGHT_MAP = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_TILED_LIGHTING_MAP = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
+	public static final int TEXTURE_UNIT_TONEMAP_SCENE = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
+	public static final int TEXTURE_UNIT_TONEMAP_DEPTH = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 
 	public static int MAX_IMAGE_UNITS;
 	public static int IMAGE_UNIT_COUNT = 0;
@@ -213,6 +216,9 @@ public class HdPlugin extends Plugin {
 	public static final int[] RENDERBUFFER_FORMATS_LINEAR_WITH_ALPHA = {
 		GL_RGBA8,
 		GL_RGBA // should be guaranteed
+	};
+	public static final int[] RENDERBUFFER_FORMATS_HDR = {
+		GL_RGBA16F
 	};
 
 	public static final int PROCESSOR_COUNT = Runtime.getRuntime().availableProcessors();
@@ -300,6 +306,9 @@ public class HdPlugin extends Plugin {
 	private UIShaderProgram uiProgram;
 
 	@Inject
+	private TonemapShaderProgram tonemapProgram;
+
+	@Inject
 	private SceneManager sceneManager;
 
 	@Inject
@@ -378,6 +387,8 @@ public class HdPlugin extends Plugin {
 	private int rboSceneDepth;
 	public int fboSceneResolve;
 	private int rboSceneResolveColor;
+	private int texSceneResolve;
+	private int texSceneDepthResolve;
 
 	public int shadowMapResolution;
 	public int fboShadowMap;
@@ -542,6 +553,8 @@ public class HdPlugin extends Plugin {
 				rboSceneDepth = 0;
 				fboSceneResolve = 0;
 				rboSceneResolveColor = 0;
+				texSceneResolve = 0;
+				texSceneDepthResolve = 0;
 				fboShadowMap = 0;
 				frame = 0;
 				elapsedTime = 0;
@@ -972,6 +985,7 @@ public class HdPlugin extends Plugin {
 
 		renderer.initializeShaders(includes);
 		uiProgram.compile(includes);
+		tonemapProgram.compile(includes);
 
 		if (configDynamicLights != DynamicLights.NONE && configTiledLighting) {
 			if (!AMD_GPU && configTiledLightingImageLoadStore &&
@@ -1033,6 +1047,7 @@ public class HdPlugin extends Plugin {
 	private void destroyShaders() {
 		renderer.destroyShaders();
 		uiProgram.destroy();
+		tonemapProgram.destroy();
 
 		tiledLightingImageStoreProgram.destroy();
 		for (var program : tiledLightingShaderPrograms)
@@ -1312,9 +1327,15 @@ public class HdPlugin extends Plugin {
 		checkGLErrors();
 		boolean alpha = alphaBits > 0;
 
-		int[] desiredFormats = sRGB ?
-			alpha ? RENDERBUFFER_FORMATS_SRGB_WITH_ALPHA : RENDERBUFFER_FORMATS_SRGB :
-			alpha ? RENDERBUFFER_FORMATS_LINEAR_WITH_ALPHA : RENDERBUFFER_FORMATS_LINEAR;
+		boolean isZoneRenderer = renderer instanceof ZoneRenderer;
+		int[] desiredFormats;
+		if (isZoneRenderer) {
+			desiredFormats = RENDERBUFFER_FORMATS_HDR;
+		} else if (sRGB) {
+			desiredFormats = alpha ? RENDERBUFFER_FORMATS_SRGB_WITH_ALPHA : RENDERBUFFER_FORMATS_SRGB;
+		} else {
+			desiredFormats = alpha ? RENDERBUFFER_FORMATS_LINEAR_WITH_ALPHA : RENDERBUFFER_FORMATS_LINEAR;
+		}
 
 		float resolutionScale = config.sceneResolutionScale() / 100f;
 		sceneResolution = round(max(vec(1), multiply(slice(vec(sceneViewport), 2), resolutionScale)));
@@ -1356,14 +1377,43 @@ public class HdPlugin extends Plugin {
 		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboSceneDepth);
 		checkGLErrors();
 
-		// If necessary, create an FBO for resolving multisampling
-		if (msaaSamples > 1 && resolutionScale != 1) {
+		// Create a resolve FBO: always texture-backed for the zone renderer (needed by the tonemap pass),
+		// or renderbuffer-backed when multisampling + resolution scaling is active under the legacy renderer.
+		boolean needsResolveFbo = isZoneRenderer || (msaaSamples > 1 && resolutionScale != 1);
+
+		if (needsResolveFbo) {
 			fboSceneResolve = glGenFramebuffers();
 			glBindFramebuffer(GL_FRAMEBUFFER, fboSceneResolve);
-			rboSceneResolveColor = glGenRenderbuffers();
-			glBindRenderbuffer(GL_RENDERBUFFER, rboSceneResolveColor);
-			glRenderbufferStorageMultisample(GL_RENDERBUFFER, 0, format, sceneResolution[0], sceneResolution[1]);
-			glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rboSceneResolveColor);
+
+			if (isZoneRenderer) {
+				// Texture-backed so the tonemap pass can sample it
+				texSceneResolve = glGenTextures();
+				glActiveTexture(TEXTURE_UNIT_TONEMAP_SCENE);
+				glBindTexture(GL_TEXTURE_2D, texSceneResolve);
+				// `format` is currently always GL_RGBA16F; if HDR formats are extended, the type below must match.
+				glTexImage2D(GL_TEXTURE_2D, 0, format, sceneResolution[0], sceneResolution[1], 0, GL_RGBA, GL_HALF_FLOAT, (ByteBuffer) null);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+				glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texSceneResolve, 0);
+
+				// Depth texture for sky bypass in tonemap pass (reverse depth: untouched pixels have depth == 0)
+				texSceneDepthResolve = glGenTextures();
+				glActiveTexture(TEXTURE_UNIT_TONEMAP_DEPTH);
+				glBindTexture(GL_TEXTURE_2D, texSceneDepthResolve);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, sceneResolution[0], sceneResolution[1], 0, GL_DEPTH_COMPONENT, GL_FLOAT, (ByteBuffer) null);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+				glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texSceneDepthResolve, 0);
+			} else {
+				rboSceneResolveColor = glGenRenderbuffers();
+				glBindRenderbuffer(GL_RENDERBUFFER, rboSceneResolveColor);
+				glRenderbufferStorageMultisample(GL_RENDERBUFFER, 0, format, sceneResolution[0], sceneResolution[1]);
+				glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rboSceneResolveColor);
+			}
 			checkGLErrors();
 		}
 
@@ -1394,6 +1444,14 @@ public class HdPlugin extends Plugin {
 		if (rboSceneResolveColor != 0)
 			glDeleteRenderbuffers(rboSceneResolveColor);
 		rboSceneResolveColor = 0;
+
+		if (texSceneResolve != 0)
+			glDeleteTextures(texSceneResolve);
+		texSceneResolve = 0;
+
+		if (texSceneDepthResolve != 0)
+			glDeleteTextures(texSceneDepthResolve);
+		texSceneDepthResolve = 0;
 	}
 
 	private void initializeShadowMapFbo() {
@@ -1529,6 +1587,40 @@ public class HdPlugin extends Plugin {
 				.queue();
 		}
 		pbo.unbind();
+	}
+
+	public void runTonemapPass() {
+		if (tonemapProgram == null || !tonemapProgram.isValid()) {
+			// Fallback: clear the scene area so drawUi() doesn't composite over a stale frame.
+			glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
+			glViewport(sceneViewport[0], sceneViewport[1], sceneViewport[2], sceneViewport[3]);
+			glClearColor(0, 0, 0, 1);
+			glClear(GL_COLOR_BUFFER_BIT);
+			return;
+		}
+
+		glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
+		glViewport(
+			sceneViewport[0],
+			sceneViewport[1],
+			sceneViewport[2],
+			sceneViewport[3]
+		);
+
+		glActiveTexture(TEXTURE_UNIT_TONEMAP_SCENE);
+		glBindTexture(GL_TEXTURE_2D, texSceneResolve);
+
+		int filter = config.sceneScalingMode().glFilter;
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+
+		glActiveTexture(TEXTURE_UNIT_TONEMAP_DEPTH);
+		glBindTexture(GL_TEXTURE_2D, texSceneDepthResolve);
+
+		tonemapProgram.use();
+		glDisable(GL_BLEND);
+		glBindVertexArray(vaoTri);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
 	}
 
 	public void drawUi(int overlayColor) {
@@ -1977,8 +2069,13 @@ public class HdPlugin extends Plugin {
 	public float getGammaCorrection() {
 		if (config.useLegacyBrightness())
 			return 1;
-		return 100f / config.brightness();
+		return 100f / config.legacyRendererGamma();
 	}
+
+	public float getExposure() {
+		return config.tonemapExposure() / 100f;
+	}
+
 
 	public int getExpandedMapLoadingChunks() {
 		if (useLowMemoryMode)

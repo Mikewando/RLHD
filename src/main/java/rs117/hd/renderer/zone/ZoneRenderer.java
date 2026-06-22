@@ -574,7 +574,13 @@ public class ZoneRenderer implements Renderer {
 		}
 		plugin.uboGlobal.useFog.set(fogDepth > 0 ? 1 : 0);
 		plugin.uboGlobal.fogDepth.set(fogDepth);
-		plugin.uboGlobal.fogColor.set(ColorUtils.linearToSrgb(environmentManager.currentFogColor));
+		// fogColor uploaded sRGB-encoded so it lives in the same space scene_frag's
+		// other state lands in by the time it reaches the fog mix — matches legacy's
+		// upload (LegacyRenderer.java:991). The water/scene skyLightColor lines pick
+		// this up too and now use sRGB-encoded magnitude consistent with legacy.
+		float[] fogSrgb = ColorUtils.linearToSrgb(environmentManager.currentFogColor);
+		plugin.uboGlobal.fogColor.set(fogSrgb);
+		plugin.uboGlobal.skyColor.set(fogSrgb);
 
 		plugin.uboGlobal.drawDistance.set((float) plugin.getDrawDistance());
 		plugin.uboGlobal.expandedMapLoadingChunks.set(ctx.sceneContext.expandedMapLoadingChunks);
@@ -584,6 +590,9 @@ public class ZoneRenderer implements Renderer {
 		float lightBrightnessMultiplier = 0.8f;
 		float midBrightnessMultiplier = 0.45f;
 		float darkBrightnessMultiplier = 0.05f;
+		// Match legacy derivation: the wrap puts the gradient stops in the same
+		// "unicorn" sRGB-encoded space the legacy shader was tuned around, so the
+		// shader's internal mix() produces identical numerical output in both renderers.
 		float[] waterColorLight = ColorUtils.linearToSrgb(ColorUtils.hsvToSrgb(new float[] {
 			waterColorHsv[0],
 			waterColorHsv[1],
@@ -604,6 +613,11 @@ public class ZoneRenderer implements Renderer {
 		plugin.uboGlobal.waterColorDark.set(waterColorDark);
 
 		plugin.uboGlobal.gammaCorrection.set(plugin.getGammaCorrection());
+		plugin.uboGlobal.exposure.set(plugin.getExposure());
+		plugin.uboGlobal.agxMinEv.set((float) config.agxMinEv());
+		plugin.uboGlobal.agxMaxEv.set((float) config.agxMaxEv());
+		plugin.uboGlobal.agxPunchSaturation.set(config.agxPunchSaturation() / 100f);
+		plugin.uboGlobal.agxPunchPower.set(config.agxPunchPower() / 100f);
 		float ambientStrength = environmentManager.currentAmbientStrength;
 		float directionalStrength = environmentManager.currentDirectionalStrength;
 		if (config.useLegacyBrightness()) {
@@ -796,14 +810,27 @@ public class ZoneRenderer implements Renderer {
 		// Clear scene
 		frameTimer.begin(Timer.CLEAR_SCENE);
 
-		float[] clearColor = { 0, 0, 0 };
+		// Sky background pixels (cleared, no geometry over them) should display
+		// at the per-environment fogColor visual. Inverse-AgX gives us the HDR
+		// scene-referred value that, when run through the tonemap with the
+		// current EV range and exposure, produces that target on-screen.
+		// FBO stores OKLab, so encode the HDR sky as OKLab for the clear color.
+		// Use glClearBufferfv (not glClearColor) so the OKLab values — which
+		// can exceed [0,1] in L and be negative in a/b — aren't clamped before
+		// reaching the RGBA16F framebuffer.
+		float[] clearOklab = { 0, 0, 0 };
 		if (!shouldRenderSkybox) {
-			float[] fogColor = ColorUtils.linearToSrgb(environmentManager.currentFogColor);
-			pow(clearColor, fogColor, plugin.getGammaCorrection());
+			float[] hdrSky = ColorUtils.agxInverseToHdrInput(
+				environmentManager.currentFogColor,
+				(float) config.agxMinEv(),
+				(float) config.agxMaxEv(),
+				plugin.getExposure()
+			);
+			clearOklab = ColorUtils.linearToOklab(hdrSky);
 		}
-		glClearColor(clearColor[0], clearColor[1], clearColor[2], 1f);
+		glClearBufferfv(GL_COLOR, 0, new float[] { clearOklab[0], clearOklab[1], clearOklab[2], 1f });
 		glClearDepth(0);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glClear(GL_DEPTH_BUFFER_BIT);
 		frameTimer.end(Timer.CLEAR_SCENE);
 
 		frameTimer.begin(Timer.RENDER_SCENE);
@@ -1135,32 +1162,18 @@ public class ZoneRenderer implements Renderer {
 			}
 
 			if (sceneFboValid && plugin.sceneResolution != null && plugin.sceneViewport != null) {
+				// Required: scenePass() does not leave any read-framebuffer binding in place
 				glBindFramebuffer(GL_READ_FRAMEBUFFER, plugin.fboScene);
-				if (plugin.fboSceneResolve != 0) {
-					// Blit from the scene FBO to the multisample resolve FBO
-					glBindFramebuffer(GL_DRAW_FRAMEBUFFER, plugin.fboSceneResolve);
-					glBlitFramebuffer(
-						0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
-						0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
-						GL_COLOR_BUFFER_BIT, GL_NEAREST
-					);
-					glBindFramebuffer(GL_READ_FRAMEBUFFER, plugin.fboSceneResolve);
-				}
-
-				// Blit from the resolved FBO to the default FBO
-				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, plugin.awtContext.getFramebuffer(false));
+				// Blit from the scene FBO to the resolve FBO (always present under zone renderer)
+				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, plugin.fboSceneResolve);
 				glBlitFramebuffer(
-					0,
-					0,
-					plugin.sceneResolution[0],
-					plugin.sceneResolution[1],
-					plugin.sceneViewport[0],
-					plugin.sceneViewport[1],
-					plugin.sceneViewport[0] + plugin.sceneViewport[2],
-					plugin.sceneViewport[1] + plugin.sceneViewport[3],
-					GL_COLOR_BUFFER_BIT,
-					config.sceneScalingMode().glFilter
+					0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
+					0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
+					GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST
 				);
+
+				// Tonemap pass: sample fboSceneResolve, write to default FBO
+				plugin.runTonemapPass();
 			} else {
 				glBindFramebuffer(GL_FRAMEBUFFER, plugin.awtContext.getFramebuffer(false));
 				glClearColor(0, 0, 0, 1);

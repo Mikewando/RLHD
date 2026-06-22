@@ -127,6 +127,106 @@ public class ColorUtils {
 		return result;
 	}
 
+	// OKLab conversion. Björn Ottosson's canonical matrices.
+	// Reference: https://bottosson.github.io/posts/oklab/
+	public static float[] linearToOklab(float[] c) {
+		float l = 0.4122214708f * c[0] + 0.5363325363f * c[1] + 0.0514459929f * c[2];
+		float m = 0.2119034982f * c[0] + 0.6806995451f * c[1] + 0.1073969566f * c[2];
+		float s = 0.0883024619f * c[0] + 0.2817188376f * c[1] + 0.6299787005f * c[2];
+		float l_ = Math.signum(l) * (float) Math.cbrt(Math.abs(l));
+		float m_ = Math.signum(m) * (float) Math.cbrt(Math.abs(m));
+		float s_ = Math.signum(s) * (float) Math.cbrt(Math.abs(s));
+		return new float[] {
+			0.2104542553f * l_ + 0.7936177850f * m_ - 0.0040720468f * s_,
+			1.9779984951f * l_ - 2.4285922050f * m_ + 0.4505937099f * s_,
+			0.0259040371f * l_ + 0.7827717662f * m_ - 0.8086757660f * s_
+		};
+	}
+
+	public static float[] oklabToLinear(float[] c) {
+		float l_ = c[0] + 0.3963377774f * c[1] + 0.2158037573f * c[2];
+		float m_ = c[0] - 0.1055613458f * c[1] - 0.0638541728f * c[2];
+		float s_ = c[0] - 0.0894841775f * c[1] - 1.2914855480f * c[2];
+		float l = l_ * l_ * l_;
+		float m = m_ * m_ * m_;
+		float s = s_ * s_ * s_;
+		return new float[] {
+			+4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s,
+			-1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s,
+			-0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s
+		};
+	}
+
+	// AgX matrices — keep in sync with utils/tonemap.glsl.
+	// (Stored row-major as 3 vec3 rows for clarity; helper does row × col mul.)
+	private static final float[][] AGX_INPUT_MATRIX_ROWS = {
+		{ 0.842479062253094f, 0.0423282422610123f, 0.0423756549057051f },
+		{ 0.0784335999999992f, 0.878468636469772f, 0.0784336f },
+		{ 0.0792237451477643f, 0.0791661274605434f, 0.879142973793104f }
+	};
+	private static final float[][] AGX_OUTPUT_MATRIX_ROWS = {
+		{ 1.19687900512017f, -0.0980208811401368f, -0.0990297440797205f },
+		{ -0.0528968517574562f, 1.15190312990417f, -0.0989611768448433f },
+		{ -0.0529716355144438f, -0.0980434501171241f, 1.15107367264116f }
+	};
+
+	private static float[] agxMat3MulVec(float[][] rows, float[] v) {
+		return new float[] {
+			rows[0][0] * v[0] + rows[0][1] * v[1] + rows[0][2] * v[2],
+			rows[1][0] * v[0] + rows[1][1] * v[1] + rows[1][2] * v[2],
+			rows[2][0] * v[0] + rows[2][1] * v[1] + rows[2][2] * v[2]
+		};
+	}
+
+	// AgX sigmoid polynomial — same coefficients as utils/tonemap.glsl.
+	private static float agxSigmoid(float x) {
+		float x2 = x * x;
+		float x4 = x2 * x2;
+		return 15.5f * x4 * x2
+			- 40.14f * x4 * x
+			+ 31.96f * x4
+			- 6.868f * x2 * x
+			+ 0.4298f * x2
+			+ 0.1191f * x
+			- 0.00232f;
+	}
+
+	// Numerical inverse of the AgX sigmoid via bisection.
+	private static float inverseAgxSigmoid(float target) {
+		float lo = 0, hi = 1;
+		for (int i = 0; i < 32; i++) {
+			float mid = (lo + hi) * 0.5f;
+			if (agxSigmoid(mid) < target) lo = mid; else hi = mid;
+		}
+		return (lo + hi) * 0.5f;
+	}
+
+	/**
+	 * Compute the HDR scene value (pre-exposure) that, when passed through the
+	 * AgX tonemap with the given EV range and exposure, displays approximately
+	 * as the given target linear color. Inverse follows:
+	 *   v = INPUT_MATRIX * target → invSigmoid per channel → denormalize → 2^ →
+	 *   scene = OUTPUT_MATRIX * v → clamp ≥0 → scene / exposure.
+	 *
+	 * The clamp at the end is because AgX's gamut after the matrix dance can
+	 * require negative scene-RGB to hit highly saturated targets, but AgX's
+	 * own max(hdr, 0) discards negatives — so we can't actually hit those.
+	 * The returned value is the closest achievable in the non-negative gamut;
+	 * the actual displayed sky may be slightly desaturated vs. the target.
+	 */
+	public static float[] agxInverseToHdrInput(float[] targetDisplayLinear, float minEv, float maxEv, float exposure) {
+		float[] v = agxMat3MulVec(AGX_INPUT_MATRIX_ROWS, targetDisplayLinear);
+		for (int i = 0; i < 3; i++) {
+			float sigIn = inverseAgxSigmoid(v[i]);
+			float logVal = minEv + sigIn * (maxEv - minEv);
+			v[i] = (float) Math.pow(2, logVal);
+		}
+		float[] scene = agxMat3MulVec(AGX_OUTPUT_MATRIX_ROWS, v);
+		float invExp = 1f / Math.max(exposure, 1e-6f);
+		for (int i = 0; i < 3; i++) scene[i] = Math.max(scene[i], 0f) * invExp;
+		return scene;
+	}
+
 	/**
 	 * Convert sRGB in the range 0-1 to HSL in the range 0-1.
 	 *
