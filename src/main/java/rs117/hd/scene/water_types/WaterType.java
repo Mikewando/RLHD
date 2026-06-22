@@ -17,8 +17,7 @@ import rs117.hd.scene.materials.Material;
 import rs117.hd.utils.ColorUtils;
 import rs117.hd.utils.GsonUtils;
 
-import static rs117.hd.utils.ColorUtils.linearToSrgb;
-import static rs117.hd.utils.ColorUtils.rgb;
+import static rs117.hd.utils.ColorUtils.srgb;
 
 @NoArgsConstructor
 @GsonUtils.ExcludeDefaults
@@ -34,12 +33,16 @@ public class WaterType {
 	private float fresnelAmount = 1;
 	@Nullable
 	private Material normalMap;
-	@JsonAdapter(ColorUtils.SrgbToLinearAdapter.class)
+	// JSON hex is artist-friendly notation, but these values are consumed as linear
+	// floats by both renderers (legacy historically did so; zone now does too post-cleanup).
+	// SrgbAdapter parses the hex into bytes-as-floats without an sRGB decode — that's the
+	// magnitude the artist tuned against, and the magnitude the lighting math expects.
+	@JsonAdapter(ColorUtils.SrgbAdapter.class)
 	private float[] surfaceColor = { 1, 1, 1 };
-	@JsonAdapter(ColorUtils.SrgbToLinearAdapter.class)
-	private float[] foamColor = rgb(176, 164, 146);
-	@JsonAdapter(ColorUtils.SrgbToLinearAdapter.class)
-	private float[] depthColor = rgb(0, 117, 142);
+	@JsonAdapter(ColorUtils.SrgbAdapter.class)
+	private float[] foamColor = srgb(176, 164, 146);
+	@JsonAdapter(ColorUtils.SrgbAdapter.class)
+	private float[] depthColor = srgb(0, 117, 142);
 	private boolean hasFoam = true;
 	private float duration = 1;
 	public int fishingSpotRecolor = -1;
@@ -84,9 +87,9 @@ public class WaterType {
 		struct.hasFoam.set(hasFoam ? 1 : 0);
 		struct.duration.set(duration);
 		struct.fresnelAmount.set(fresnelAmount);
-		struct.surfaceColor.set(linearToSrgb(surfaceColor));
-		struct.foamColor.set(linearToSrgb(foamColor));
-		struct.depthColor.set(linearToSrgb(depthColor));
+		struct.surfaceColor.set(surfaceColor);
+		struct.foamColor.set(foamColor);
+		struct.depthColor.set(depthColor);
 		struct.normalMap.set(Material.getTextureLayer(normalMap));
 	}
 

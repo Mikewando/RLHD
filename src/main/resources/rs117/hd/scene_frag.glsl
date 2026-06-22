@@ -76,11 +76,52 @@ vec2 worldUvs(float scale) {
 #include <utils/specular.glsl>
 #include <utils/displacement.glsl>
 #include <utils/shadows.glsl>
+#include <utils/legacy_water.glsl>
 #include <utils/water.glsl>
 #include <utils/color_filters.glsl>
 #include <utils/fog.glsl>
 #include <utils/wireframe.glsl>
 #include <utils/lights.glsl>
+
+// =============================================================================
+// Color-space conventions in this shader
+// =============================================================================
+// Three spaces appear in this file. Mixing them silently is the source of
+// almost every water/lighting bug we've debugged. Each transition is marked.
+//
+//   LINEAR           Physical light values in [0, ∞). All lighting math
+//                    (ambient × dir + diffuse + specular) lives here. The
+//                    `textureArray` sampler is GL_SRGB8_ALPHA8 so diffuse
+//                    samples auto-decode to LINEAR. Vertex HSL goes through
+//                    srgbToLinear() to get here. Uniforms `ambientColor` and
+//                    `lightColor` are LINEAR.
+//
+//   sRGB-encoded     Values that look right when treated as display bytes.
+//                    Range nominally [0, 1] but extrapolated values can spill
+//                    above 1 (linearToSrgb(2.0) ≈ 1.39). The GL alpha blend
+//                    operates on these so multiplicative attenuation matches
+//                    legacy's RGBA8-byte behavior. depthColor / foamColor /
+//                    waterColor* / fogColor uniforms are sRGB-encoded by
+//                    convention — that's the magnitude the shader's water mix
+//                    and fog mix were tuned around.
+//
+//   unicorn-hybrid   What the water shader returns: a numerical mix of a
+//                    LINEAR lit_surface and an sRGB-encoded gradient. Not a
+//                    proper color space; lives at roughly sRGB magnitudes
+//                    because the dominant fresnel weight is on the gradient.
+//                    Don't apply colorspace conversions to this — match
+//                    legacy's "treat it as bytes" handling.
+//
+// Pipeline (zone):
+//   shader_frag computes in LINEAR → wraps to sRGB-encoded for sampleUnderwater
+//   and fog (so those operate in the space they were tuned for) → converts to
+//   OKLab right before FragColor → GL alpha blend operates on OKLab values
+//   (perceptually uniform interpolation) → FBO → tonemap_frag converts OKLab
+//   back to linear, clamps, encodes sRGB for display.
+//
+// Legacy pipeline: same lighting math, wraps to sRGB-encoded, no OKLab step,
+// writes sRGB-encoded directly to RGBA8 → display interprets bytes as sRGB.
+// =============================================================================
 
 void main() {
     vec3 downDir = vec3(0, -1, 0);
@@ -117,6 +158,7 @@ void main() {
     vec4 outputColor = vec4(1);
 
     if (isWater) {
+        // sampleWater returns in unicorn-hybrid space. Don't try to convert.
         outputColor = sampleWater(waterTypeIndex, viewDir);
     } else {
         vec2 blendedUv = IN.uv;
@@ -222,7 +264,8 @@ void main() {
         vec4 baseColor2 = vec4(convertHsl(hsl2), 1 - float(fAlphaBiasHsl[1] >> 24 & 0xff) / 255.);
         vec4 baseColor3 = vec4(convertHsl(hsl3), 1 - float(fAlphaBiasHsl[2] >> 24 & 0xff) / 255.);
 
-        // Convert to linear RGB
+        // Jagex HSL (from convertHsl) → sRGB-encoded → LINEAR. baseColor* is
+        // now LINEAR albedo, ready to multiply against texture & lighting.
         baseColor1.rgb = srgbToLinear(hslToSrgb(baseColor1.xyz));
         baseColor2.rgb = srgbToLinear(hslToSrgb(baseColor2.xyz));
         baseColor3.rgb = srgbToLinear(hslToSrgb(baseColor3.xyz));
@@ -236,7 +279,8 @@ void main() {
         }
         #endif
 
-        // get diffuse textures
+        // get diffuse textures. textureArray is GL_SRGB8_ALPHA8 (MaterialManager.java)
+        // so the sampler auto-decodes the bytes to LINEAR. texColor* is LINEAR.
         vec4 texColor1 = colorMap1 == -1 ? vec4(1) : texture(textureArray, vec3(uv1, colorMap1), mipBias);
         vec4 texColor2 = colorMap2 == -1 ? vec4(1) : texture(textureArray, vec3(uv2, colorMap2), mipBias);
         vec4 texColor3 = colorMap3 == -1 ? vec4(1) : texture(textureArray, vec3(uv3, colorMap3), mipBias);
@@ -346,6 +390,9 @@ void main() {
         // specular
         vec3 vSpecularGloss = vec3(material1.specularGloss, material2.specularGloss, material3.specularGloss);
         vec3 vSpecularStrength = vec3(material1.specularStrength, material2.specularStrength, material3.specularStrength);
+        // Roughness maps are data, not colors. Sampler auto-decoded to LINEAR
+        // for us; linearToSrgb undoes that so we get back the byte-as-float
+        // value the artist authored. Same trick is used on normal maps.
         vSpecularStrength *= vec3(
             material1.roughnessMap == -1 ? 1 : linearToSrgb(texture(textureArray, vec3(uv1, material1.roughnessMap)).r),
             material2.roughnessMap == -1 ? 1 : linearToSrgb(texture(textureArray, vec3(uv2, material2.roughnessMap)).r),
@@ -366,7 +413,8 @@ void main() {
         float combinedSpecularStrength = dot(vSpecularStrength, IN.texBlend);
 
 
-        // calculate lighting
+        // calculate lighting — all light contributions below are in LINEAR space.
+        // They sum into compositeLight which is then multiplied into the albedo.
 
         // ambient light
         vec3 ambientLightOut = ambientColor * ambientStrength;
@@ -412,7 +460,10 @@ void main() {
         vec3 pointLightsSpecularOut = vec3(0);
         calculateLighting(IN.position, normals, viewDir, IN.texBlend, vSpecularGloss, vSpecularStrength, pointLightsOut, pointLightsSpecularOut);
 
-        // sky light
+        // sky light. fogColor uniform is sRGB-encoded for both renderers (zone's
+        // upload now applies linearToSrgb to match legacy). Treated as LINEAR
+        // here for lighting math — same "unicorn" convention used by the water
+        // gradient stops. Legacy was tuned this way; zone now matches.
         vec3 skyLightColor = fogColor;
         float skyLightStrength = 0.5;
         float skyDotNormals = downDotNormals;
@@ -461,17 +512,28 @@ void main() {
             outputColor.rgb = srgbToLinear(outputColor.rgb);
         #endif
 
+        // Apply lighting to the albedo: outputColor (LINEAR) × compositeLight
+        // (LINEAR) = lit_albedo (LINEAR, may be HDR > 1 with dir × 4).
         if (tint.w > 0) {
             outputColor.rgb *= 1.0 + skyLightOut;
         } else {
             outputColor.rgb *= mix(compositeLight, vec3(1), unlit);
         }
+        // ─── transition LINEAR → sRGB-encoded ───
+        // Puts terrain in the same space legacy uses for the rest of its
+        // pipeline. sampleUnderwater expects this (multiplies by sRGB-encoded
+        // depthColor); the fog mix below also runs in this space.
         outputColor.rgb = linearToSrgb(outputColor.rgb);
 
         if (isUnderwater) {
+            // Multiplies outputColor (sRGB-encoded) by mix(1, depthColor, t).
+            // depthColor is sRGB-encoded, so this is sRGB × sRGB.
             sampleUnderwater(outputColor.rgb, waterType, waterDepth, lightDotNormals);
         }
     }
+    // Beyond this point, outputColor.rgb is sRGB-encoded for terrain branches
+    // and unicorn-hybrid for water (≈ sRGB-encoded magnitude). Either way, NOT
+    // linear, and downstream code should treat it as display-space-ish.
 
     #if LEGACY_RENDERER
         vec2 tiledist = abs(floor(IN.position.xz / 128) - floor(cameraPos.xz / 128));
@@ -483,29 +545,36 @@ void main() {
         }
     #endif
 
+    // Clamp before the GL alpha blend so per-channel saturation of HDR-bright
+    // values (notably water specular peaks) collapses to neutral white the way
+    // legacy's RGBA8 storage forces it to. Without this, channel ratios are
+    // preserved through the alpha multiplication and bright peaks display with
+    // their underlying tint (e.g. bluish sun glints on water).
     outputColor.rgb = clamp(outputColor.rgb, 0, 1);
 
-    // Skip unnecessary color conversion if possible
-    if (saturation != 1 || contrast != 1) {
-        vec3 hsv = srgbToHsv(outputColor.rgb);
+    #if LEGACY_RENDERER
+        // Skip unnecessary color conversion if possible
+        if (saturation != 1 || contrast != 1) {
+            vec3 hsv = srgbToHsv(outputColor.rgb);
 
-        // Apply saturation setting
-        hsv.y *= saturation;
+            // Apply saturation setting
+            hsv.y *= saturation;
 
-        // Apply contrast setting
-        if (hsv.z > 0.5) {
-            hsv.z = 0.5 + ((hsv.z - 0.5) * contrast);
-        } else {
-            hsv.z = 0.5 - ((0.5 - hsv.z) * contrast);
+            // Apply contrast setting
+            if (hsv.z > 0.5) {
+                hsv.z = 0.5 + ((hsv.z - 0.5) * contrast);
+            } else {
+                hsv.z = 0.5 - ((0.5 - hsv.z) * contrast);
+            }
+
+            outputColor.rgb = hsvToSrgb(hsv);
         }
 
-        outputColor.rgb = hsvToSrgb(hsv);
-    }
+        outputColor.rgb = colorBlindnessCompensation(outputColor.rgb);
 
-    outputColor.rgb = colorBlindnessCompensation(outputColor.rgb);
-
-    #if APPLY_COLOR_FILTER
-        outputColor.rgb = applyColorFilter(outputColor.rgb);
+        #if APPLY_COLOR_FILTER
+            outputColor.rgb = applyColorFilter(outputColor.rgb);
+        #endif
     #endif
 
     #if WIREFRAME
@@ -529,14 +598,43 @@ void main() {
             outputColor.a = combinedFog + outputColor.a * (1 - combinedFog);
         }
 
-        outputColor.rgb = mix(outputColor.rgb, fogColor, combinedFog);
+        #if LEGACY_RENDERER
+            // outputColor and fogColor are both sRGB-encoded; direct mix in
+            // sRGB-encoded space matches the convention legacy always used.
+            outputColor.rgb = mix(outputColor.rgb, fogColor, combinedFog);
+        #else
+            // Currently identical to the legacy branch — both inputs are sRGB-encoded
+            // (outputColor from the wrap above, fogColor from the ZoneRenderer upload
+            // that now applies linearToSrgb to match). Kept as a separate branch
+            // because if the whole sRGB-blend strategy gets swapped for OKLab, the
+            // zone fog mix will move to OKLab while legacy's stays as-is.
+            outputColor.rgb = mix(outputColor.rgb, fogColor, combinedFog);
+        #endif
     }
 
-    outputColor.rgb = pow(outputColor.rgb, vec3(gammaCorrection));
+    #if LEGACY_RENDERER
+        outputColor.rgb = pow(outputColor.rgb, vec3(gammaCorrection));
 
-    #if WINDOWS_HDR_CORRECTION
-        outputColor.rgb = windowsHdrCorrection(outputColor.rgb);
+        #if WINDOWS_HDR_CORRECTION
+            outputColor.rgb = windowsHdrCorrection(outputColor.rgb);
+        #endif
     #endif
 
+    #if !LEGACY_RENDERER
+        // ─── transition sRGB-encoded → OKLab ───
+        // Up to this point outputColor.rgb is sRGB-encoded (terrain) or
+        // unicorn-hybrid (water, ≈ sRGB-encoded magnitude). Convert to OKLab
+        // so the GL alpha blend that follows interpolates perceptually rather
+        // than in sRGB-byte space. tonemap_frag converts back to sRGB-encoded
+        // for display.
+        outputColor.rgb = linearToOklab(srgbToLinear(outputColor.rgb));
+    #endif
+
+    // FragColor convention:
+    //   Zone — OKLab (L, a, b). RGBA16F FBO; GL alpha blend interpolates the
+    //          three OKLab channels per-channel linearly, which IS a
+    //          perceptually-uniform interpolation. tonemap_frag converts back.
+    //   Legacy — sRGB-encoded. RGBA8 FBO; alpha blend in byte space; display
+    //            interprets bytes as sRGB.
     FragColor = outputColor;
 }

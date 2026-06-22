@@ -110,6 +110,38 @@ float linearToSrgb(float rgb) {
     step(0.0031308, rgb));
 }
 
+// OKLab conversion. Björn Ottosson's canonical matrices.
+// Reference: https://bottosson.github.io/posts/oklab/
+// sign(x) * pow(abs(x), 1/3) instead of plain pow because GLSL
+// pow(negative, fractional) is undefined / returns NaN.
+vec3 linearToOklab(vec3 c) {
+    float l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;
+    float m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;
+    float s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;
+    float l_ = sign(l) * pow(abs(l), 1.0/3.0);
+    float m_ = sign(m) * pow(abs(m), 1.0/3.0);
+    float s_ = sign(s) * pow(abs(s), 1.0/3.0);
+    return vec3(
+        0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+        1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+        0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+    );
+}
+
+vec3 oklabToLinear(vec3 c) {
+    float l_ = c.x + 0.3963377774 * c.y + 0.2158037573 * c.z;
+    float m_ = c.x - 0.1055613458 * c.y - 0.0638541728 * c.z;
+    float s_ = c.x - 0.0894841775 * c.y - 1.2914855480 * c.z;
+    float l = l_ * l_ * l_;
+    float m = m_ * m_ * m_;
+    float s = s_ * s_ * s_;
+    return vec3(
+        +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+    );
+}
+
 // https://web.archive.org/web/20230619214343/https://en.wikipedia.org/wiki/HSL_and_HSV#Color_conversion_formulae
 vec3 srgbToHsl(vec3 srgb) {
     float V = max(max(srgb.r, srgb.g), srgb.b);
@@ -205,4 +237,28 @@ int srgbToPackedHsl(vec3 srgb) {
 
 vec3 packedHslToSrgb(int hsl) {
     return hslToSrgb(convertHsl(unpackRawHsl(hsl)));
+}
+
+// Adjust chroma around the Rec.709 luma axis in linear space.
+// amount == 1.0 is identity; amount > 1.0 increases saturation; amount < 1.0 desaturates toward grey.
+// Operates in any RGB space (linear or sRGB), but produces physically-correct results when used in linear.
+vec3 boostSaturation(vec3 color, float amount) {
+    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    return mix(vec3(luma), color, amount);
+}
+
+// Apply saturation and contrast adjustments to an sRGB color.
+// Saturation is a multiplier on HSV saturation. Contrast pivots HSV value around 0.5.
+vec3 applySaturationContrast(vec3 srgb, float saturation, float contrast) {
+    if (saturation == 1.0 && contrast == 1.0)
+        return srgb;
+
+    vec3 hsv = srgbToHsv(srgb);
+    hsv.y *= saturation;
+    if (hsv.z > 0.5) {
+        hsv.z = 0.5 + ((hsv.z - 0.5) * contrast);
+    } else {
+        hsv.z = 0.5 - ((0.5 - hsv.z) * contrast);
+    }
+    return hsvToSrgb(hsv);
 }

@@ -19,6 +19,11 @@ public class UBOGlobal extends UniformBuffer<GLBuffer> {
 
 	public Property colorBlindnessIntensity = addProperty(PropertyType.Float, "colorBlindnessIntensity");
 	public Property gammaCorrection = addProperty(PropertyType.Float, "gammaCorrection");
+	public Property exposure = addProperty(PropertyType.Float, "exposure");
+	public Property agxMinEv = addProperty(PropertyType.Float, "agxMinEv");
+	public Property agxMaxEv = addProperty(PropertyType.Float, "agxMaxEv");
+	public Property agxPunchSaturation = addProperty(PropertyType.Float, "agxPunchSaturation");
+	public Property agxPunchPower = addProperty(PropertyType.Float, "agxPunchPower");
 	public Property saturation = addProperty(PropertyType.Float, "saturation");
 	public Property contrast = addProperty(PropertyType.Float, "contrast");
 	public Property colorFilterPrevious = addProperty(PropertyType.Int, "colorFilterPrevious");
@@ -38,6 +43,7 @@ public class UBOGlobal extends UniformBuffer<GLBuffer> {
 	public Property useFog = addProperty(PropertyType.Int, "useFog");
 	public Property fogDepth = addProperty(PropertyType.Float, "fogDepth");
 	public Property fogColor = addProperty(PropertyType.FVec3, "fogColor");
+	public Property skyColor = addProperty(PropertyType.FVec3, "skyColor");
 	public Property groundFogStart = addProperty(PropertyType.Float, "groundFogStart");
 	public Property groundFogEnd = addProperty(PropertyType.Float, "groundFogEnd");
 	public Property groundFogOpacity = addProperty(PropertyType.Float, "groundFogOpacity");
