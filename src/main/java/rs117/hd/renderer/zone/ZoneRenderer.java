@@ -864,7 +864,9 @@ public class ZoneRenderer implements Renderer {
 				environmentManager.currentFogColor,
 				(float) config.agxMinEv(),
 				(float) config.agxMaxEv(),
-				plugin.getExposure()
+				plugin.getExposure(),
+				config.agxPunchSaturation() / 100f,
+				config.agxPunchPower() / 100f
 			);
 			clearOklab = ColorUtils.linearToOklab(hdrSky);
 		}

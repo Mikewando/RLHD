@@ -203,10 +203,10 @@ public class ColorUtils {
 
 	/**
 	 * Compute the HDR scene value (pre-exposure) that, when passed through the
-	 * AgX tonemap with the given EV range and exposure, displays approximately
-	 * as the given target linear color. Inverse follows:
-	 *   v = INPUT_MATRIX * target → invSigmoid per channel → denormalize → 2^ →
-	 *   scene = OUTPUT_MATRIX * v → clamp ≥0 → scene / exposure.
+	 * AgX tonemap with the given EV range, exposure, and punchy parameters,
+	 * displays approximately as the given target linear color. Inverse follows:
+	 *   v = INPUT_MATRIX * target → invPunchy → invSigmoid per channel →
+	 *   denormalize → 2^ → scene = OUTPUT_MATRIX * v → clamp ≥0 → /exposure.
 	 *
 	 * The clamp at the end is because AgX's gamut after the matrix dance can
 	 * require negative scene-RGB to hit highly saturated targets, but AgX's
@@ -214,8 +214,16 @@ public class ColorUtils {
 	 * The returned value is the closest achievable in the non-negative gamut;
 	 * the actual displayed sky may be slightly desaturated vs. the target.
 	 */
-	public static float[] agxInverseToHdrInput(float[] targetDisplayLinear, float minEv, float maxEv, float exposure) {
+	public static float[] agxInverseToHdrInput(
+		float[] targetDisplayLinear,
+		float minEv,
+		float maxEv,
+		float exposure,
+		float punchSaturation,
+		float punchPower
+	) {
 		float[] v = agxMat3MulVec(AGX_INPUT_MATRIX_ROWS, targetDisplayLinear);
+		v = inverseAgxLookPunchy(v, punchSaturation, punchPower);
 		for (int i = 0; i < 3; i++) {
 			float sigIn = inverseAgxSigmoid(v[i]);
 			float logVal = minEv + sigIn * (maxEv - minEv);
@@ -225,6 +233,33 @@ public class ColorUtils {
 		float invExp = 1f / Math.max(exposure, 1e-6f);
 		for (int i = 0; i < 3; i++) scene[i] = Math.max(scene[i], 0f) * invExp;
 		return scene;
+	}
+
+	// Inverse of agxLookPunchy. Forward per channel:
+	//   out_i = (1 - sat) * luma_in + sat * max(ldr_i, 0)^power
+	// where luma_in = dot(ldr, lw). Luma couples the channels, so iterate:
+	// guess L = luma, solve each channel, recompute L. Converges in a few
+	// passes for the slider ranges we expose (sat 0–2, power 0.5–2).
+	private static float[] inverseAgxLookPunchy(float[] out, float sat, float power) {
+		if (sat < 1e-3f) {
+			// Forward collapses to a neutral grey, inverse is underdetermined.
+			return new float[] { out[0], out[1], out[2] };
+		}
+		float invPow = 1f / power;
+		float oneMinusSat = 1f - sat;
+		float lwR = 0.2126f, lwG = 0.7152f, lwB = 0.0722f;
+		float[] ldr = { out[0], out[1], out[2] };
+		float L = lwR * ldr[0] + lwG * ldr[1] + lwB * ldr[2];
+		for (int iter = 0; iter < 8; iter++) {
+			float c = oneMinusSat * L;
+			for (int i = 0; i < 3; i++) {
+				float t = (out[i] - c) / sat;
+				if (t < 0) t = 0;
+				ldr[i] = (float) Math.pow(t, invPow);
+			}
+			L = lwR * ldr[0] + lwG * ldr[1] + lwB * ldr[2];
+		}
+		return ldr;
 	}
 
 	/**
