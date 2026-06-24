@@ -217,6 +217,7 @@
   },
   {
     "name": "LAVA",
+    "legacyHighlightClip": true,
     "vanillaTextureIndex": 31,
     "flowMap": "LAVA_FLOW_MAP",
     "overrideBaseColor": true,
@@ -274,6 +275,7 @@
   },
   {
     "name": "FIRE_CAPE",
+    "legacyHighlightClip": true,
     "vanillaTextureIndex": 40,
     "flowMap": "LAVA_FLOW_MAP",
     "overrideBaseColor": true,
@@ -355,6 +357,7 @@
   },
   {
     "name": "RED_LAVA",
+    "legacyHighlightClip": true,
     "vanillaTextureIndex": 56
   },
   {
@@ -368,6 +371,7 @@
   },
   {
     "name": "INFERNAL_CAPE",
+    "legacyHighlightClip": true,
     "vanillaTextureIndex": 59,
     "flowMap": "LAVA_FLOW_MAP",
     "overrideBaseColor": true,
@@ -2263,6 +2267,7 @@
   },
   {
     "name": "HD_LAVA_1",
+    "legacyHighlightClip": true,
     "flowMap": "LAVA_FLOW_MAP",
     "overrideBaseColor": true,
     "unlit": true,
@@ -2274,6 +2279,7 @@
   },
   {
     "name": "HD_LAVA_2",
+    "legacyHighlightClip": true,
     "flowMap": "LAVA_FLOW_MAP",
     "overrideBaseColor": true,
     "unlit": true,
@@ -2285,6 +2291,7 @@
   },
   {
     "name": "HD_MAGMA_1",
+    "legacyHighlightClip": true,
     "flowMap": "LAVA_FLOW_MAP",
     "overrideBaseColor": true,
     "unlit": true,
@@ -2296,6 +2303,7 @@
   },
   {
     "name": "HD_MAGMA_2",
+    "legacyHighlightClip": true,
     "flowMap": "LAVA_FLOW_MAP",
     "overrideBaseColor": true,
     "unlit": true,
@@ -2524,6 +2532,7 @@
   },
   {
     "name": "HD_INFERNAL_CAPE",
+    "legacyHighlightClip": true,
     "flowMap": "LAVA_FLOW_MAP",
     "overrideBaseColor": true,
     "unlit": true,
@@ -2543,6 +2552,7 @@
   },
   {
     "name": "LEGACY_INFERNAL_CAPE",
+    "legacyHighlightClip": true,
     "flowMap": "LAVA_FLOW_MAP",
     "overrideBaseColor": true,
     "unlit": true,
@@ -2621,6 +2631,7 @@
   },
   {
     "name": "HD_LAVA_3",
+    "legacyHighlightClip": true,
     "flowMap": "LAVA_FLOW_MAP",
     "overrideBaseColor": true,
     "unlit": true,
