@@ -24,6 +24,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #version 330
+#extension GL_ARB_shader_storage_buffer_object : require
+#extension GL_ARB_shading_language_420pack : require
 
 #define DISPLAY_BASE_COLOR 0
 #define DISPLAY_UV 0
@@ -43,6 +45,15 @@ uniform sampler2DArray textureArray;
 uniform sampler2D shadowMap;
 uniform usampler2DArray tiledLightingArray;
 
+#if !LEGACY_RENDERER
+// Debug probe SSBO: one shared 16 vec4 buffer written from scene_frag (slots 0..3)
+// and tonemap_frag (slots 4..15). Java reads back after the frame.
+layout(std430, binding = 10) buffer DebugProbeBuffer {
+    vec4 debugProbeData[96];
+    uint sceneFragHits;
+};
+#endif
+
 // general HD settings
 
 flat in int fWorldViewId;
@@ -61,7 +72,14 @@ in FragmentData {
     vec3 texBlend;
 } IN;
 
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
+#if !LEGACY_RENDERER
+// Second color attachment: per-fragment tagged-glow signal. The same alpha-blend
+// used for FragColor accumulates this value into a per-pixel mask in [0..1] that
+// tonemap_frag samples to drive AgX-time chroma compensation. Declared as vec4
+// for driver compatibility — the destination is R8 so only .r is sampled.
+layout(location = 1) out vec4 fragTag;
+#endif
 
 vec2 worldUvs(float scale) {
     return -IN.position.xz / (128 * scale);
@@ -127,6 +145,21 @@ void main() {
     vec3 downDir = vec3(0, -1, 0);
     // View & light directions are from the fragment to the camera/light
     vec3 viewDir = normalize(cameraPos - IN.position);
+
+    #if !LEGACY_RENDERER
+        // Default the tag-mask output so debug-mode early-returns don't leave the
+        // second color attachment undefined.
+        fragTag = vec4(0.0);
+    #endif
+
+    // Probe-scope shadows of per-fragment values; populated inside the non-water
+    // terrain branch when available, else stay zero (water fragments).
+    float _probeHasAttachedLightBlend = 0.0;
+    float _probeUnlit = 0.0;
+    float _probeCompositeLightLen = 0.0;
+    vec3 _probeBaseColor = vec3(0.0);
+    int _probeColorMap1 = -2;
+    int _probeColorMap2 = -2;
 
     Material material1 = getMaterial(fMaterialData[0] >> MATERIAL_INDEX_SHIFT & MATERIAL_INDEX_MASK);
     Material material2 = getMaterial(fMaterialData[1] >> MATERIAL_INDEX_SHIFT & MATERIAL_INDEX_MASK);
@@ -357,6 +390,22 @@ void main() {
 
         outputColor = mix(underlayColor, overlayColor, overlayMix);
 
+        // Probe-scope shadows for per-fragment stack metadata.
+        _probeBaseColor = baseColor1.rgb * IN.texBlend.x + baseColor2.rgb * IN.texBlend.y + baseColor3.rgb * IN.texBlend.z;
+        _probeColorMap1 = colorMap1;
+        _probeColorMap2 = colorMap2;
+
+        #if !LEGACY_RENDERER
+            // ── debug probe: capture outputColor right after base/texture blend, before any lighting ──
+            if (debugProbeArm != 0 && ivec2(gl_FragCoord.xy) == debugProbePixelScene) {
+                debugProbeData[16] = vec4(outputColor.rgb, outputColor.a);
+                debugProbeData[17].x = float(overlayCount);
+                debugProbeData[17].y = float(underlayCount);
+                debugProbeData[17].z = float(colorMap1);
+                debugProbeData[17].w = float(colorMap2);
+            }
+        #endif
+
         // normals
         vec3 normals;
         if ((fMaterialData[0] >> MATERIAL_FLAG_UPWARDS_NORMALS & 1) == 1) {
@@ -504,6 +553,10 @@ void main() {
             getMaterialIsUnlit(material3)
         ));
 
+        // Surface vibrance / probe support: shadow lighting magnitude into function scope
+        _probeUnlit = unlit;
+        _probeCompositeLightLen = length(compositeLight);
+
         #if VANILLA_COLOR_BANDING
             outputColor.rgb = linearToSrgb(outputColor.rgb);
             outputColor.rgb = srgbToHsv(outputColor.rgb);
@@ -514,11 +567,56 @@ void main() {
 
         // Apply lighting to the albedo: outputColor (LINEAR) × compositeLight
         // (LINEAR) = lit_albedo (LINEAR, may be HDR > 1 with dir × 4).
+        #if !LEGACY_RENDERER
+            // ── debug probe: capture outputColor right BEFORE the lighting multiply ──
+            if (debugProbeArm != 0 && ivec2(gl_FragCoord.xy) == debugProbePixelScene) {
+                debugProbeData[18] = vec4(outputColor.rgb, outputColor.a);
+                debugProbeData[19] = vec4(compositeLight, unlit);
+                debugProbeData[20] = vec4(tint.xyz, tint.w);
+            }
+        #endif
+
         if (tint.w > 0) {
             outputColor.rgb *= 1.0 + skyLightOut;
         } else {
             outputColor.rgb *= mix(compositeLight, vec3(1), unlit);
         }
+
+        #if !LEGACY_RENDERER
+            // Per-fragment hasAttachedLightBlend drives the R8 tag attachment that
+            // tonemap_frag samples to apply AgX-time chroma compensation. The previous
+            // per-fragment inverse-AgX path was removed — see docs/agx-tag-mrt-plan.md
+            // for why that approach was structurally wrong (operating on a color that
+            // wasn't what AgX eventually saw, then diluted by alpha blend and OKLab
+            // encode before reaching the tonemap).
+            float hasAttachedLightBlend = dot(IN.texBlend, vec3(
+                (fMaterialData[0] >> MATERIAL_FLAG_HAS_ATTACHED_LIGHT & 1),
+                (fMaterialData[1] >> MATERIAL_FLAG_HAS_ATTACHED_LIGHT & 1),
+                (fMaterialData[2] >> MATERIAL_FLAG_HAS_ATTACHED_LIGHT & 1)
+            ));
+            _probeHasAttachedLightBlend = hasAttachedLightBlend;
+            if (debugAttachedLightTint != 0 && hasAttachedLightBlend > 0.0) {
+                // Visual debug only: additive magenta wash over tagged fragments.
+                outputColor.rgb += vec3(5.0, 0.0, 5.0) * hasAttachedLightBlend;
+            }
+
+            // ── debug probe writes for scene_frag (slots 0..3) ──
+            if (debugProbeArm != 0 && ivec2(gl_FragCoord.xy) == debugProbePixelScene) {
+                debugProbeData[0] = vec4(outputColor.rgb, hasAttachedLightBlend);
+                debugProbeData[1] = vec4(
+                    intBitsToFloat(fMaterialData[0]),
+                    intBitsToFloat(fMaterialData[1]),
+                    intBitsToFloat(fMaterialData[2]),
+                    0.0
+                );
+                debugProbeData[2] = vec4(IN.texBlend, 0.0);
+                debugProbeData[3] = vec4(outputColor.rgb, hasAttachedLightBlend);
+                debugProbeData[15].x = float(int(gl_FragCoord.x));
+                debugProbeData[15].y = float(int(gl_FragCoord.y));
+                debugProbeData[15].z += 1.0; // shaderHits (scene)
+            }
+        #endif
+
         // ─── transition LINEAR → sRGB-encoded ───
         // Puts terrain in the same space legacy uses for the rest of its
         // pipeline. sampleUnderwater expects this (multiplies by sRGB-encoded
@@ -550,9 +648,10 @@ void main() {
     // legacy's RGBA8 storage forces it to. Without this, channel ratios are
     // preserved through the alpha multiplication and bright peaks display with
     // their underlying tint (e.g. bluish sun glints on water).
-    outputColor.rgb = clamp(outputColor.rgb, 0, 1);
+    //outputColor.rgb = clamp(outputColor.rgb, 0, 1);
 
     #if LEGACY_RENDERER
+        outputColor.rgb = clamp(outputColor.rgb, 0, 1);
         // Skip unnecessary color conversion if possible
         if (saturation != 1 || contrast != 1) {
             vec3 hsv = srgbToHsv(outputColor.rgb);
@@ -636,5 +735,49 @@ void main() {
     //          perceptually-uniform interpolation. tonemap_frag converts back.
     //   Legacy — sRGB-encoded. RGBA8 FBO; alpha blend in byte space; display
     //            interprets bytes as sRGB.
+    #if !LEGACY_RENDERER
+        // ── debug probe: capture every fragment that writes to this pixel ──
+        // Each entry is 2 vec4 starting at slot 24:
+        //   slot 24+2k:   outputColor.rgba — what GL blends as src into the OKLab FBO
+        //                 (rgb = OKLab encoded for zone, a = blend alpha).
+        //   slot 24+2k+1: (hasAttachedLightBlend, intBitsToFloat(fMaterialData[0]),
+        //                  unlit, length(compositeLight)).
+        // hasAttachedLightBlend/unlit/compositeLight are zero for water fragments.
+        if (debugProbeArm != 0 && ivec2(gl_FragCoord.xy) == debugProbePixelScene) {
+            uint idx = atomicAdd(sceneFragHits, 1u);
+            if (idx < 24u) {
+                uint base = 24u + 3u * idx;
+                debugProbeData[base] = outputColor;
+                debugProbeData[base + 1u] = vec4(
+                    _probeHasAttachedLightBlend,
+                    intBitsToFloat(fMaterialData[0]),
+                    _probeUnlit,
+                    _probeCompositeLightLen
+                );
+                debugProbeData[base + 2u] = vec4(
+                    _probeBaseColor,
+                    intBitsToFloat(_probeColorMap1)
+                );
+            }
+        }
+    #endif
+
     FragColor = outputColor;
+    #if !LEGACY_RENDERER
+        // Tag mask, written to a second R8 attachment that gets alpha-blended through
+        // the scene pass the same way FragColor is. Two things must be true for a
+        // fragment to push the per-pixel tag up:
+        //   (1) the fragment came from tagged geometry (hasAttachedLightBlend > 0); and
+        //   (2) the fragment actually contributes visible brightness (outputColor.r —
+        //       OKLab L at this point — is clamped to [0,1]; near-zero means the
+        //       fragment is essentially invisible, e.g. the GOTR barrier dummy whose
+        //       lit color is 0 and whose alpha is ~0.004).
+        // Without (2), an invisible-but-tagged near-transparent draw would still
+        // contribute its alpha-weighted fraction to the tag and compensate background
+        // pixels that the user never sees a tagged contribution at.
+        // (Declared vec4 for driver compatibility — single-float outputs to R8
+        // attachments were silently dropped on at least one Nvidia driver build.)
+        float tagContribution = _probeHasAttachedLightBlend * clamp(outputColor.r, 0.0, 1.0);
+        fragTag = vec4(tagContribution);
+    #endif
 }

@@ -4,6 +4,8 @@ import java.awt.event.KeyEvent;
 import javax.inject.Inject;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Client;
+import net.runelite.api.Point;
 import net.runelite.api.events.*;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.Keybind;
@@ -34,6 +36,11 @@ public class DeveloperTools implements KeyListener {
 	private static final Keybind KEY_TOGGLE_ORTHOGRAPHIC = new Keybind(KeyEvent.VK_TAB, SHIFT_DOWN_MASK);
 	private static final Keybind KEY_TOGGLE_HIDE_UI = new Keybind(KeyEvent.VK_H, CTRL_DOWN_MASK);
 	private static final Keybind KEY_RELOAD_SCENE = new Keybind(KeyEvent.VK_R, CTRL_DOWN_MASK);
+	private static final Keybind KEY_PROBE_PIXEL = new Keybind(KeyEvent.VK_P, CTRL_DOWN_MASK | SHIFT_DOWN_MASK);
+	private static final Keybind KEY_TOGGLE_CURSOR_MARKER = new Keybind(KeyEvent.VK_M, CTRL_DOWN_MASK | SHIFT_DOWN_MASK);
+
+	@Inject
+	private Client client;
 
 	@Inject
 	private ClientThread clientThread;
@@ -178,6 +185,22 @@ public class DeveloperTools implements KeyListener {
 			hideUiEnabled = !hideUiEnabled;
 		} else if (KEY_RELOAD_SCENE.matches(e)) {
 			plugin.renderer.reloadScene();
+		} else if (KEY_PROBE_PIXEL.matches(e)) {
+			armDebugProbeAtCursor();
+		} else if (KEY_TOGGLE_CURSOR_MARKER.matches(e)) {
+			rs117.hd.utils.DebugProbe.showCursorMarker = !rs117.hd.utils.DebugProbe.showCursorMarker;
+			log.info("[probe] cursor marker {}", rs117.hd.utils.DebugProbe.showCursorMarker ? "ON" : "OFF");
+			if (rs117.hd.utils.DebugProbe.showCursorMarker) {
+				java.awt.Canvas cv = client.getCanvas();
+				log.info("[probe] state: client.canvas={}x{}, awt.canvas={}x{}, actualUiRes={}x{},"
+					+ " sceneViewport={}, sceneResolution={}, stretched={}",
+					client.getCanvasWidth(), client.getCanvasHeight(),
+					cv == null ? -1 : cv.getWidth(), cv == null ? -1 : cv.getHeight(),
+					plugin.actualUiResolution[0], plugin.actualUiResolution[1],
+					java.util.Arrays.toString(plugin.sceneViewport),
+					java.util.Arrays.toString(plugin.sceneResolution),
+					client.isStretchedEnabled());
+			}
 		} else {
 			return;
 		}
@@ -189,4 +212,27 @@ public class DeveloperTools implements KeyListener {
 
 	@Override
 	public void keyTyped(KeyEvent e) {}
+
+	private void armDebugProbeAtCursor() {
+		if (plugin.debugProbe == null) {
+			log.warn("[probe] DebugProbe not initialized");
+			return;
+		}
+		Point cursor = client.getMouseCanvasPosition();
+		if (cursor == null || cursor.getX() < 0 || cursor.getY() < 0) {
+			log.warn("[probe] cursor not on canvas");
+			return;
+		}
+		int[] pixels = rs117.hd.utils.DebugProbe.mapCursorToProbePixels(
+			cursor.getX(), cursor.getY(),
+			client.getCanvasWidth(), client.getCanvasHeight(),
+			plugin.actualUiResolution, plugin.sceneViewport, plugin.sceneResolution,
+			true
+		);
+		if (pixels == null) {
+			log.warn("[probe] mapping failed (state not ready)");
+			return;
+		}
+		plugin.debugProbe.arm(pixels[0], pixels[1], pixels[2], pixels[3]);
+	}
 }

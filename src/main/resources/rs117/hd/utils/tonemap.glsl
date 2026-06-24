@@ -51,6 +51,12 @@ vec3 agxLookPunchy(vec3 ldr) {
     return luma + agxPunchSaturation * (graded - luma);
 }
 
+// (Previously the GLSL port of ColorUtils.agxInverseToHdrInput lived here, used
+// by an earlier per-fragment compensation in scene_frag. That approach is now
+// replaced by the MRT tag-mask + tonemap-time saturation compensation; see
+// docs/agx-tag-mrt-plan.md. The Java CPU-side ColorUtils.agxInverseToHdrInput
+// still exists for the sky clear-color computation in ZoneRenderer.scenePass.)
+
 vec3 agxTonemap(vec3 hdr) {
     // Guard against negatives that would break the log
     hdr = max(hdr, vec3(0.0));

@@ -115,6 +115,7 @@ public final class AsyncCachedModel extends Job implements Model {
 	private boolean isModelPartiallyVisible;
 	private int drawIndex;
 	private int orientation;
+	private int uuid;
 	private int x;
 	private int y;
 	private int z;
@@ -208,6 +209,7 @@ public final class AsyncCachedModel extends Job implements Model {
 	}
 
 	public synchronized void queue(
+		int uuid,
 		@Nonnull WorldViewContext ctx,
 		@Nonnull Projection projection,
 		@Nullable TileObject tileObject,
@@ -222,6 +224,7 @@ public final class AsyncCachedModel extends Job implements Model {
 		int x, int y, int z,
 		@Nonnull UploadModelFunc uploadFunc
 	) {
+		this.uuid = uuid;
 		this.ctx = ctx;
 		this.projection = projection;
 		this.tileObject = tileObject;
@@ -334,6 +337,7 @@ public final class AsyncCachedModel extends Job implements Model {
 
 		try {
 			uploadFunc.upload(
+				uuid,
 				ctx,
 				projection,
 				tileObject,
@@ -447,6 +451,7 @@ public final class AsyncCachedModel extends Job implements Model {
 	@FunctionalInterface
 	public interface UploadModelFunc {
 		void upload(
+			int uuid,
 			@Nonnull WorldViewContext ctx,
 			@Nonnull Projection projection,
 			@Nullable TileObject tileObject,
