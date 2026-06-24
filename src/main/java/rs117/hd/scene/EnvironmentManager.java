@@ -151,6 +151,10 @@ public class EnvironmentManager {
 	public float currentWindCeiling = 0f;
 	private float targetWindCeiling = 0f;
 
+	private float startLegacyHighlightMix = 0f;
+	public float currentLegacyHighlightMix = 0f;
+	private float targetLegacyHighlightMix = 0f;
+
 	private boolean lightningEnabled = false;
 	private boolean forceNextTransition = false;
 
@@ -286,6 +290,7 @@ public class EnvironmentManager {
 			currentWindSpeed = mix(startWindSpeed, targetWindSpeed, t);
 			currentWindStrength = mix(startWindStrength, targetWindStrength, t);
 			currentWindCeiling = mix(startWindCeiling, targetWindCeiling, t);
+			currentLegacyHighlightMix = mix(startLegacyHighlightMix, targetLegacyHighlightMix, t);
 		}
 
 		updateLightning();
@@ -337,6 +342,7 @@ public class EnvironmentManager {
 		startWindSpeed = currentWindSpeed;
 		startWindStrength = currentWindStrength;
 		startWindCeiling = currentWindCeiling;
+		startLegacyHighlightMix = currentLegacyHighlightMix;
 		for (int i = 0; i < 2; i++)
 			startSunAngles[i] = mod(currentSunAngles[i], TWO_PI);
 
@@ -348,6 +354,7 @@ public class EnvironmentManager {
 		targetGroundFogEnd = env.groundFogEnd;
 		targetGroundFogOpacity = env.groundFogOpacity;
 		lightningEnabled = env.lightningEffects;
+		targetLegacyHighlightMix = env.legacyHighlightMix;
 
 		var overworldEnv = getOverworldEnvironment();
 		float[] sunAngles = env.sunAngles;
