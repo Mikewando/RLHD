@@ -5784,8 +5784,14 @@
     "description": "LAVABUBBLES",
     "baseMaterial": "GRAY_110",
     "upwardsNormals": true,
+    "legacyHighlightClip": true,
     "objectIds": [
-      "LAVABUBBLES"
+      "LAVABUBBLES",
+      "LAVABUBBLES_LARGE",
+      "RC_ZMI_LAVABUBBLES",
+      "RC_ZMI_LAVABUBBLES_LARGE",
+      "RAIDS_LAVABUBBLES",
+      "RAIDS_LAVABUBBLES_LARGE"
     ]
   },
   {
