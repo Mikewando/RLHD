@@ -260,6 +260,7 @@
   },
   {
     "area": "TZHAAR",
+    "legacyHighlightMix": 1.0,
     "ambientColor": "#ffeacc",
     "ambientStrength": 0.8,
     "directionalColor": "#ffa400",
