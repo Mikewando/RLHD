@@ -43468,6 +43468,7 @@
     "description": "Perilous Moons - Dragon Head Wall Fountains",
     "baseMaterial": "ROCK_3",
     "uvType": "BOX",
+    "legacyHighlightClip": true,
     "objectIds": [
       "ROR_TEMPLE_WATERFALL01",
       "ROR_TEMPLE_WATERFALL01_ODD01",
