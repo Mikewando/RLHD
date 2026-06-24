@@ -41,16 +41,21 @@ void main() {
     //     across the scene, lets a whole zone (e.g. TZHAAR) hard-clip highlights.
     //   - tag * agxSurfaceVibrance: per-fragment, driven by the R8 tag mask that
     //     scene_frag writes for fragments with attached lights.
-    // The target is the AgX EV-range normalisation applied per-channel without
-    // the input matrix, sigmoid, punchy, or output matrix. This preserves AgX's
-    // exposure/brightness response (so dialing agxLegacyMix doesn't make the
-    // scene darker for the same exposure) while removing AgX's chroma-killing
-    // input matrix and soft sigmoid rolloff — channels clip independently at
-    // 2^maxEv, giving the saturated legacy-clip character.
+    // Target construction: apply AgX's brightness response (log + EV normalise +
+    // sigmoid) to LUMINANCE only, then scale the per-channel linear by that
+    // response and hard-clip. This keeps the saturated legacy-clip hue shift
+    // (e.g. fire's high-R / mid-G clips to yellow because R saturates at 1
+    // before G does) while making exposure behave like the AgX path — typical
+    // game HDR values are well below 2^maxEv, so a per-channel sigmoid would
+    // never actually clip them and channel ratios would survive when the artist
+    // intent is the legacy hue-collapse.
     float tag = texture(tagTex, fUv).r;
     float effective = min(agxLegacyMix + tag * agxSurfaceVibrance, 1.0);
     if (effective > 0.0) {
-        vec3 legacyTarget = clamp((log2(max(linear, vec3(1e-10))) - agxMinEv) / (agxMaxEv - agxMinEv), 0.0, 1.0);
+        float lum = dot(linear, vec3(0.2126, 0.7152, 0.0722));
+        float lumNorm = clamp((log2(max(lum, 1e-10)) - agxMinEv) / (agxMaxEv - agxMinEv), 0.0, 1.0);
+        float lumOut = clamp(agxDefaultContrastApprox(vec3(lumNorm)).x, 0.0, 1.0);
+        vec3 legacyTarget = clamp(linear * (lumOut / max(lum, 1e-10)), 0.0, 1.0);
         agxOut = mix(agxOut, legacyTarget, effective);
     }
 
