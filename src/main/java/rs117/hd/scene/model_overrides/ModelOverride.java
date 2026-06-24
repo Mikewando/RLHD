@@ -77,6 +77,7 @@ public class ModelOverride
 	public boolean terrainVertexSnap = false;
 	public boolean doubleSidedFaces = false;
 	public boolean undoVanillaShading = true;
+	public boolean legacyHighlightClip = false;
 	private boolean hideAsWaterEffect = false;
 	public float terrainVertexSnapThreshold = 0.125f;
 	public float shadowOpacityThreshold = 0;
@@ -312,6 +313,7 @@ public class ModelOverride
 			terrainVertexSnap,
 			doubleSidedFaces,
 			undoVanillaShading,
+			legacyHighlightClip,
 			hideAsWaterEffect,
 			terrainVertexSnapThreshold,
 			shadowOpacityThreshold,
