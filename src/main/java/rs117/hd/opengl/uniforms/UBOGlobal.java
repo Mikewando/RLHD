@@ -24,8 +24,8 @@ public class UBOGlobal extends UniformBuffer<GLBuffer> {
 	public Property agxMaxEv = addProperty(PropertyType.Float, "agxMaxEv");
 	public Property agxPunchSaturation = addProperty(PropertyType.Float, "agxPunchSaturation");
 	public Property agxPunchPower = addProperty(PropertyType.Float, "agxPunchPower");
-	public Property agxLightCompensation = addProperty(PropertyType.Float, "agxLightCompensation");
 	public Property agxSurfaceVibrance = addProperty(PropertyType.Float, "agxSurfaceVibrance");
+	public Property agxPointLightVibrance = addProperty(PropertyType.Float, "agxPointLightVibrance");
 	public Property agxLegacyMix = addProperty(PropertyType.Float, "agxLegacyMix");
 	public Property debugAttachedLightTint = addProperty(PropertyType.Int, "debugAttachedLightTint");
 	public Property debugProbeArm = addProperty(PropertyType.Int, "debugProbeArm");

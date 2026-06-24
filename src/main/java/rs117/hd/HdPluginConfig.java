@@ -435,27 +435,6 @@ public interface HdPluginConfig extends Config
 		return 100;
 	}
 
-	String KEY_AGX_LIGHT_COMPENSATION = "agxLightCompensation";
-	@Range(min = 0, max = 1000)
-	@Units(Units.PERCENT)
-	@ConfigItem(
-		keyName = KEY_AGX_LIGHT_COMPENSATION,
-		name = "AgX light compensation",
-		description =
-			"Pre-compensates point-light colors for AgX chroma loss so colored " +
-			"glows (lava, magical effects, GOTR portals, etc.) cast on nearby " +
-			"surfaces stay closer to the authored color after tonemapping. " +
-			"0% is no-op; 100% fully cancels AgX's input-matrix desaturation. " +
-			"Values above 100% extrapolate past the inverse, pushing colors " +
-			"deeper into the saturated region for extra punch — useful when " +
-			"AgX's highlight rolloff is still leaving the result too creamy.",
-		position = 23,
-		section = generalSettings
-	)
-	default int agxLightCompensation() {
-		return 70;
-	}
-
 	String KEY_AGX_SURFACE_VIBRANCE = "agxSurfaceVibrance";
 	@Range(min = 0, max = 1000)
 	@Units(Units.PERCENT)
@@ -476,6 +455,27 @@ public interface HdPluginConfig extends Config
 	)
 	default int agxSurfaceVibrance() {
 		return 60;
+	}
+
+	String KEY_AGX_POINT_LIGHT_VIBRANCE = "agxPointLightVibrance";
+	@Range(min = 0, max = 1000)
+	@Units(Units.PERCENT)
+	@ConfigItem(
+		keyName = KEY_AGX_POINT_LIGHT_VIBRANCE,
+		name = "AgX point-light vibrance",
+		description =
+			"Pushes fragments dominated by coloured point lights toward the " +
+			"legacy hard-clip+sRGB hue (more saturated) instead of AgX's " +
+			"photographic chroma rolloff. Driven by the fraction of composite " +
+			"light luminance contributed by point lights, so daylit overworld " +
+			"with a strong point light still reads as overworld (sun dominates), " +
+			"while a colored glow in a dark arena tags strongly. 0% disables; " +
+			"100% = full legacy tag when point lights are 100% of the lighting.",
+		position = 25,
+		section = generalSettings
+	)
+	default int agxPointLightVibrance() {
+		return 100;
 	}
 
 	String KEY_DEBUG_ATTACHED_LIGHT_TINT = "debugAttachedLightTint";

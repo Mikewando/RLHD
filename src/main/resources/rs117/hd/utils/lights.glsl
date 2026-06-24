@@ -74,28 +74,6 @@ void calculateLighting(
                 texBlend, specularGloss, specularStrength,
                 pointLightsOut, pointLightsSpecularOut);
     #endif
-
-    #if !LEGACY_RENDERER
-        // Pre-compensate the accumulated point-light contributions for AgX's
-        // chroma-killing input matrix. Multiplying by AGX_OUTPUT_MATRIX (the
-        // approximate inverse of AGX_INPUT_MATRIX) and lerping by the user-
-        // facing strength uniform makes colored glows (lava, magical effects,
-        // GOTR portals/barriers/rewards guardian, etc.) read closer to the
-        // authored light color on lit surfaces after tonemapping. The matrix
-        // is linear so applying it once to the sum is equivalent to applying
-        // it per-light and cheaper.
-        // Clamp non-negative: AGX_OUTPUT_MATRIX has negative off-diagonals and
-        // can push saturated colors slightly negative on the orthogonal axis;
-        // negatives surviving into compositeLight would poison linearToSrgb.
-        // 0 ≤ t ≤ 1 interpolates raw → compensated; t > 1 scales brightness
-        // of the (already chroma-corrected) value to push past the matrix
-        // ceiling into AgX's saturated zone, without the extrapolation hue
-        // collapse that pure mix(t>1) produces.
-        vec3 pointLightsComp = max(AGX_OUTPUT_MATRIX * pointLightsOut, vec3(0.0));
-        vec3 pointLightsSpecularComp = max(AGX_OUTPUT_MATRIX * pointLightsSpecularOut, vec3(0.0));
-        pointLightsOut = mix(pointLightsOut, pointLightsComp * max(agxLightCompensation, 1.0), min(agxLightCompensation, 1.0));
-        pointLightsSpecularOut = mix(pointLightsSpecularOut, pointLightsSpecularComp * max(agxLightCompensation, 1.0), min(agxLightCompensation, 1.0));
-    #endif
 }
 #else
 #define calculateLighting(position, normals, viewDir, texBlend, specularGloss, specularStrength, pointLightsOut,  pointLightsSpecularOut)
