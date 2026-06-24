@@ -13,6 +13,15 @@ layout(std140) uniform UBOGlobal {
     float agxMaxEv;
     float agxPunchSaturation;
     float agxPunchPower;
+    float agxLightCompensation;
+    float agxSurfaceVibrance;
+    int debugAttachedLightTint;
+    int debugProbeArm;
+    ivec2 debugProbePixelScene;
+    ivec2 debugProbePixelTonemap;
+    int debugCursorMarker;
+    ivec2 debugCursorPixelTonemap;
+    int debugTagMask;
     float saturation;
 	float contrast;
     int colorFilterPrevious;

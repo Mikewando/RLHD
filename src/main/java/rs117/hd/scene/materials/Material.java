@@ -77,6 +77,11 @@ public class Material {
 	public transient boolean isValid = true;
 
 	public static final int MAX_MATERIAL_INDEX = (1 << 12) - 1;
+	// Mirror of MATERIAL_FLAG_HAS_ATTACHED_LIGHT in constants.glsl.
+	// Set on per-face materialData ints for objects whose ID appears in
+	// lights.json; the fragment shader applies AgX surface vibrance to
+	// these fragments via the agxSurfaceVibrance uniform.
+	public static final int MATERIAL_FLAG_HAS_ATTACHED_LIGHT = 1 << 7;
 	public static final Material NONE = new Material().name("NONE");
 	public static final Material UNLIT = new Material().name("UNLIT").parent(NONE).unlit(true);
 	public static final Material[] REQUIRED_MATERIALS = { NONE, UNLIT };

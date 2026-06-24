@@ -107,6 +107,29 @@ public class LightManager {
 	private final ListMultimap<Integer, LightDefinition> PROJECTILE_LIGHTS = ArrayListMultimap.create();
 	private final ListMultimap<Integer, LightDefinition> GRAPHICS_OBJECT_LIGHTS = ArrayListMultimap.create();
 
+	/**
+	 * Returns true if the given UUID corresponds to a renderable whose ID is
+	 * present in any of the per-type light maps (npc/object/projectile/graphics
+	 * object). Used by the scene uploader to auto-tag fragments for AgX surface
+	 * vibrance pre-compensation, so colored "glowing" surfaces (GOTR portals,
+	 * magical effects, etc.) don't lose chroma to the AgX tonemap.
+	 */
+	public boolean hasAttachedLight(int uuid) {
+		int id = ModelHash.getUuidId(uuid);
+		switch (ModelHash.getUuidType(uuid)) {
+			case ModelHash.TYPE_OBJECT:
+				return OBJECT_LIGHTS.containsKey(id);
+			case ModelHash.TYPE_NPC:
+				return NPC_LIGHTS.containsKey(id);
+			case ModelHash.TYPE_PROJECTILE:
+				return PROJECTILE_LIGHTS.containsKey(id);
+			case ModelHash.TYPE_GRAPHICS_OBJECT:
+				return GRAPHICS_OBJECT_LIGHTS.containsKey(id);
+			default:
+				return false;
+		}
+	}
+
 	private final Renderable[] imposterRenderables = new Renderable[2];
 	private boolean reloadLights;
 	private EntityHiderConfig entityHiderConfig;

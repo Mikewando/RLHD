@@ -19,7 +19,11 @@
 #define MATERIAL_FLAG_WIND_MODIFIER 12
 #define MATERIAL_FLAG_WIND_SWAYING 9
 #define MATERIAL_FLAG_INVERT_DISPLACEMENT_STRENGTH 8
-#define MATERIAL_FLAG_UNDO_VANILLA_SHADING 7
+// Bit 7 was previously reserved as MATERIAL_FLAG_UNDO_VANILLA_SHADING but was
+// never actually read by any shader (undo-vanilla-shading is performed CPU-side
+// in SceneUploader on the colors directly). Repurposed for auto-tagging objects
+// that have an attached light in lights.json, which drives AgX surface vibrance.
+#define MATERIAL_FLAG_HAS_ATTACHED_LIGHT 7
 #define MATERIAL_FLAG_TERRAIN_VERTEX_SNAPPING 6
 #define MATERIAL_FLAG_DISABLE_SHADOW_RECEIVING 5
 #define MATERIAL_FLAG_UPWARDS_NORMALS 4

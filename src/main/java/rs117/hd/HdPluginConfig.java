@@ -435,6 +435,83 @@ public interface HdPluginConfig extends Config
 		return 100;
 	}
 
+	String KEY_AGX_LIGHT_COMPENSATION = "agxLightCompensation";
+	@Range(min = 0, max = 1000)
+	@Units(Units.PERCENT)
+	@ConfigItem(
+		keyName = KEY_AGX_LIGHT_COMPENSATION,
+		name = "AgX light compensation",
+		description =
+			"Pre-compensates point-light colors for AgX chroma loss so colored " +
+			"glows (lava, magical effects, GOTR portals, etc.) cast on nearby " +
+			"surfaces stay closer to the authored color after tonemapping. " +
+			"0% is no-op; 100% fully cancels AgX's input-matrix desaturation. " +
+			"Values above 100% extrapolate past the inverse, pushing colors " +
+			"deeper into the saturated region for extra punch — useful when " +
+			"AgX's highlight rolloff is still leaving the result too creamy.",
+		position = 23,
+		section = generalSettings
+	)
+	default int agxLightCompensation() {
+		return 70;
+	}
+
+	String KEY_AGX_SURFACE_VIBRANCE = "agxSurfaceVibrance";
+	@Range(min = 0, max = 1000)
+	@Units(Units.PERCENT)
+	@ConfigItem(
+		keyName = KEY_AGX_SURFACE_VIBRANCE,
+		name = "AgX surface vibrance",
+		description =
+			"Pre-compensates the surface colors of objects that have an " +
+			"attached light in lights.json (GOTR barrier, rewards guardian, " +
+			"POH portals, magical shield, etc.) so the object itself stays " +
+			"vivid through AgX rather than washing out toward white. " +
+			"0% is no-op; 100% fully cancels AgX's input-matrix desaturation. " +
+			"Values above 100% extrapolate past the inverse — try 200–500% " +
+			"on tagged surfaces to approach the saturated brightness of the " +
+			"legacy renderer for iconic emissive look.",
+		position = 24,
+		section = generalSettings
+	)
+	default int agxSurfaceVibrance() {
+		return 60;
+	}
+
+	String KEY_DEBUG_ATTACHED_LIGHT_TINT = "debugAttachedLightTint";
+	@ConfigItem(
+		keyName = KEY_DEBUG_ATTACHED_LIGHT_TINT,
+		name = "Debug: tint attached-light fragments",
+		description =
+			"Temporary debug. When enabled, any fragment auto-tagged with " +
+			"MATERIAL_FLAG_HAS_ATTACHED_LIGHT (i.e. its object/NPC/projectile/" +
+			"graphics-object ID appears in lights.json) is rendered as bright " +
+			"magenta, modulated by the per-fragment blend amount. Used to " +
+			"confirm whether the AgX surface vibrance flag is reaching the " +
+			"surfaces it should.",
+		position = 25,
+		section = generalSettings
+	)
+	default boolean debugAttachedLightTint() {
+		return false;
+	}
+
+	String KEY_DEBUG_TAG_MASK = "debugTagMask";
+	@ConfigItem(
+		keyName = KEY_DEBUG_TAG_MASK,
+		name = "Debug: show tag mask",
+		description =
+			"Temporary debug. When enabled, the screen is replaced with the R8 " +
+			"tagged-glow mask produced by scene_frag's fragTag attachment (white = " +
+			"100% tagged, black = 0%). Used to verify the mask shape before " +
+			"trusting it for tonemap-time chroma compensation.",
+		position = 26,
+		section = generalSettings
+	)
+	default boolean debugTagMask() {
+		return false;
+	}
+
 	/*====== Shadow settings ======*/
 
 	@ConfigSection(

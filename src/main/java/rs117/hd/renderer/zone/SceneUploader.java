@@ -32,6 +32,7 @@ import net.runelite.api.*;
 import net.runelite.client.callback.RenderCallbackManager;
 import rs117.hd.HdPlugin;
 import rs117.hd.scene.GamevalManager;
+import rs117.hd.scene.LightManager;
 import rs117.hd.scene.MaterialManager;
 import rs117.hd.scene.ModelOverrideManager;
 import rs117.hd.scene.ProceduralGenerator;
@@ -106,6 +107,9 @@ public class SceneUploader implements AutoCloseable {
 
 	@Inject
 	private ModelOverrideManager modelOverrideManager;
+
+	@Inject
+	private LightManager lightManager;
 
 	@Inject
 	private ProceduralGenerator proceduralGenerator;
@@ -1422,6 +1426,13 @@ public class SceneUploader implements AutoCloseable {
 			writeCache = new VertexWriteCache.Collection();
 		writeCache.setOutputBuffers(opaqueBuffer, alphaBuffer, textureBuffer);
 
+		// Auto-tag fragments for AgX surface vibrance compensation if the object
+		// has an attached light in lights.json. Computed once per model — the bit
+		// is then OR'd into each face's materialData below.
+		final int materialDataExtraBits = lightManager.hasAttachedLight(uuid)
+			? Material.MATERIAL_FLAG_HAS_ATTACHED_LIGHT : 0;
+
+		final int[][][] tileHeights = ctx.scene.getTileHeights();
 		final int faceCount = model.getFaceCount();
 		final int vertexCount = model.getVerticesCount();
 
@@ -1680,7 +1691,7 @@ public class SceneUploader implements AutoCloseable {
 					uvType = isVanillaUVMapped && textureFace != -1 ? UvType.VANILLA : UvType.GEOMETRY;
 			}
 
-			final int materialData = material.packMaterialData(faceOverride, uvType, false);
+			final int materialData = material.packMaterialData(faceOverride, uvType, false) | materialDataExtraBits;
 
 			final float[] faceUVs;
 			if (uvType == UvType.VANILLA && textureId != -1) {
@@ -2011,6 +2022,7 @@ public class SceneUploader implements AutoCloseable {
 
 	// temp draw
 	public void uploadTempModel(
+		int uuid,
 		PrimitiveCharArray faces,
 		Model model,
 		ModelOverride modelOverride,
@@ -2054,6 +2066,12 @@ public class SceneUploader implements AutoCloseable {
 			model.getVertexNormalsX() != null &&
 			model.getVertexNormalsY() != null &&
 			model.getVertexNormalsZ() != null;
+
+		// Auto-tag fragments for AgX surface vibrance compensation if the
+		// renderable has an attached light in lights.json. Mirrors the same
+		// query used in uploadStaticModel.
+		final int materialDataExtraBits = lightManager.hasAttachedLight(uuid)
+			? Material.MATERIAL_FLAG_HAS_ATTACHED_LIGHT : 0;
 
 		final byte overrideAmount = model.getOverrideAmount();
 		final byte overrideHue = model.getOverrideHue();
@@ -2101,7 +2119,7 @@ public class SceneUploader implements AutoCloseable {
 				color3 = faceOverride.modifyColor(color3);
 			}
 
-			final int materialData = material.packMaterialData(faceOverride, uvType, false);
+			final int materialData = material.packMaterialData(faceOverride, uvType, false) | materialDataExtraBits;
 
 			final int triangleA = indices1[face];
 			final int vertexOffsetA = triangleA * 3;

@@ -328,6 +328,7 @@ public class ZoneRenderer implements Renderer {
 				if (skybox != null) {
 					skybox.calculateBoundsCylinder();
 					modelStreamingManager.uploadTempModel(
+						0,
 						ctx,
 						sceneCamera,
 						null,
@@ -618,6 +619,40 @@ public class ZoneRenderer implements Renderer {
 		plugin.uboGlobal.agxMaxEv.set((float) config.agxMaxEv());
 		plugin.uboGlobal.agxPunchSaturation.set(config.agxPunchSaturation() / 100f);
 		plugin.uboGlobal.agxPunchPower.set(config.agxPunchPower() / 100f);
+		plugin.uboGlobal.agxLightCompensation.set(config.agxLightCompensation() / 100f);
+		plugin.uboGlobal.agxSurfaceVibrance.set(config.agxSurfaceVibrance() / 100f);
+		plugin.uboGlobal.debugAttachedLightTint.set(config.debugAttachedLightTint() ? 1 : 0);
+		if (plugin.debugProbe != null)
+			plugin.debugProbe.beginFrame();
+		boolean probeArmed = plugin.debugProbe != null && plugin.debugProbe.isArmedThisFrame();
+		plugin.uboGlobal.debugProbeArm.set(probeArmed ? 1 : 0);
+		int[] sp = probeArmed ? plugin.debugProbe.sceneProbePixel() : new int[] { -1, -1 };
+		int[] tp = probeArmed ? plugin.debugProbe.tonemapProbePixel() : new int[] { -1, -1 };
+		plugin.uboGlobal.debugProbePixelScene.set(sp[0], sp[1]);
+		plugin.uboGlobal.debugProbePixelTonemap.set(tp[0], tp[1]);
+
+		// Live cursor marker — recomputes the cursor's claimed tonemap pixel every frame.
+		int cursorTmX = -1, cursorTmY = -1;
+		if (rs117.hd.utils.DebugProbe.showCursorMarker) {
+			net.runelite.api.Point c = client.getMouseCanvasPosition();
+			if (c != null && c.getX() >= 0 && c.getY() >= 0) {
+				int[] px = rs117.hd.utils.DebugProbe.mapCursorToProbePixels(
+					c.getX(), c.getY(),
+					client.getCanvasWidth(), client.getCanvasHeight(),
+					plugin.actualUiResolution, plugin.sceneViewport, plugin.sceneResolution,
+					false
+				);
+				if (px != null) {
+					cursorTmX = px[2];
+					cursorTmY = px[3];
+					rs117.hd.utils.DebugProbe.cursorTonemapPixel[0] = cursorTmX;
+					rs117.hd.utils.DebugProbe.cursorTonemapPixel[1] = cursorTmY;
+				}
+			}
+		}
+		plugin.uboGlobal.debugCursorMarker.set(rs117.hd.utils.DebugProbe.showCursorMarker ? 1 : 0);
+		plugin.uboGlobal.debugCursorPixelTonemap.set(cursorTmX, cursorTmY);
+		plugin.uboGlobal.debugTagMask.set(config.debugTagMask() ? 1 : 0);
 		float ambientStrength = environmentManager.currentAmbientStrength;
 		float directionalStrength = environmentManager.currentDirectionalStrength;
 		if (config.useLegacyBrightness()) {
@@ -807,6 +842,11 @@ public class ZoneRenderer implements Renderer {
 		renderState.ido.set(indirectDrawCmds.id);
 		renderState.apply();
 
+		// Draw to both color attachments: 0 = OKLab scene color, 1 = tagged-glow R8 mask.
+		// scene_frag writes FragColor (location 0) and fragTag (location 1); both are alpha-blended
+		// with outputColor.a so the tag accumulates the alpha-weighted tagged contribution per pixel.
+		glDrawBuffers(new int[] { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 });
+
 		// Clear scene
 		frameTimer.begin(Timer.CLEAR_SCENE);
 
@@ -829,6 +869,8 @@ public class ZoneRenderer implements Renderer {
 			clearOklab = ColorUtils.linearToOklab(hdrSky);
 		}
 		glClearBufferfv(GL_COLOR, 0, new float[] { clearOklab[0], clearOklab[1], clearOklab[2], 1f });
+		// Tag attachment starts at zero (no tagged contribution).
+		glClearBufferfv(GL_COLOR, 1, new float[] { 0f, 0f, 0f, 0f });
 		glClearDepth(0);
 		glClear(GL_DEPTH_BUFFER_BIT);
 		frameTimer.end(Timer.CLEAR_SCENE);
@@ -1155,6 +1197,8 @@ public class ZoneRenderer implements Renderer {
 			}
 
 			frameTimer.begin(Timer.DRAW_SUBMIT);
+			if (plugin.debugProbe != null)
+				plugin.debugProbe.bindBeforeFrame();
 			if (shouldRenderScene) {
 				tiledLightingPass();
 				directionalShadowPass();
@@ -1164,16 +1208,39 @@ public class ZoneRenderer implements Renderer {
 			if (sceneFboValid && plugin.sceneResolution != null && plugin.sceneViewport != null) {
 				// Required: scenePass() does not leave any read-framebuffer binding in place
 				glBindFramebuffer(GL_READ_FRAMEBUFFER, plugin.fboScene);
-				// Blit from the scene FBO to the resolve FBO (always present under zone renderer)
+				// Blit color attachment 0 (OKLab scene) + depth from the scene FBO to the resolve FBO.
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, plugin.fboSceneResolve);
+				glReadBuffer(GL_COLOR_ATTACHMENT0);
+				glDrawBuffers(new int[] { GL_COLOR_ATTACHMENT0 });
 				glBlitFramebuffer(
 					0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
 					0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
 					GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST
 				);
 
+				// Second blit for attachment 1 (R8 tagged-glow mask). glBlitFramebuffer
+				// resolves whichever attachment is selected by glReadBuffer / glDrawBuffers
+				// per call, so the tag mask needs its own blit.
+				if (plugin.texSceneTagResolve != 0) {
+					glReadBuffer(GL_COLOR_ATTACHMENT1);
+					glDrawBuffers(new int[] { GL_COLOR_ATTACHMENT1 });
+					glBlitFramebuffer(
+						0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
+						0, 0, plugin.sceneResolution[0], plugin.sceneResolution[1],
+						GL_COLOR_BUFFER_BIT, GL_NEAREST
+					);
+					// Restore default draw buffer mapping for any subsequent draw operations.
+					glDrawBuffers(new int[] { GL_COLOR_ATTACHMENT0 });
+				}
+
 				// Tonemap pass: sample fboSceneResolve, write to default FBO
 				plugin.runTonemapPass();
+				if (plugin.debugProbe != null) {
+					plugin.debugProbe.captureProbeCrop(
+						plugin.actualUiResolution[0], plugin.actualUiResolution[1],
+						plugin.awtContext.getBufferMode());
+					plugin.debugProbe.readbackAndLog();
+				}
 			} else {
 				glBindFramebuffer(GL_FRAMEBUFFER, plugin.awtContext.getFramebuffer(false));
 				glClearColor(0, 0, 0, 1);

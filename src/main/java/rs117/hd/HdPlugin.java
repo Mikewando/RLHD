@@ -117,6 +117,7 @@ import rs117.hd.scene.TextureManager;
 import rs117.hd.scene.TileOverrideManager;
 import rs117.hd.scene.WaterTypeManager;
 import rs117.hd.utils.ColorUtils;
+import rs117.hd.utils.DebugProbe;
 import rs117.hd.utils.DestructibleHandler;
 import rs117.hd.utils.DeveloperTools;
 import rs117.hd.utils.FileWatcher;
@@ -174,6 +175,7 @@ public class HdPlugin extends Plugin {
 	public static final int TEXTURE_UNIT_TILED_LIGHTING_MAP = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_TONEMAP_SCENE = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_TONEMAP_DEPTH = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
+	public static final int TEXTURE_UNIT_TONEMAP_TAG = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 
 	public static int MAX_IMAGE_UNITS;
 	public static int IMAGE_UNIT_COUNT = 0;
@@ -369,7 +371,7 @@ public class HdPlugin extends Plugin {
 	@Getter
 	@Nullable
 	private int[] uiResolution;
-	private final int[] actualUiResolution = { 0, 0 }; // Includes stretched mode and DPI scaling
+	public final int[] actualUiResolution = { 0, 0 }; // Includes stretched mode and DPI scaling
 	private final GLBuffer[] pboUi = new GLBuffer[3];
 	private int texUi;
 	private int uiWidth;
@@ -384,6 +386,11 @@ public class HdPlugin extends Plugin {
 	public int[] sceneResolution;
 	public int fboScene;
 	private int rboSceneColor;
+	// R8 second color attachment carrying per-pixel "tagged glow contribution" mask;
+	// scene_frag writes fragTag with the same alpha blend as outputColor so the value
+	// accumulates the fraction of the pixel that came from tagged geometry.
+	private int rboSceneTag;
+	public int texSceneTagResolve;
 	private int rboSceneDepth;
 	public int fboSceneResolve;
 	private int rboSceneResolveColor;
@@ -400,6 +407,7 @@ public class HdPlugin extends Plugin {
 	public int texTiledLighting;
 
 	public UBOGlobal uboGlobal;
+	public DebugProbe debugProbe;
 	public UBOUI uboUI;
 	public UBOLights uboLights;
 	public UBOLights uboLightsCulling;
@@ -551,8 +559,10 @@ public class HdPlugin extends Plugin {
 				fboScene = 0;
 				rboSceneColor = 0;
 				rboSceneDepth = 0;
+				rboSceneTag = 0;
 				fboSceneResolve = 0;
 				rboSceneResolveColor = 0;
+				texSceneTagResolve = 0;
 				texSceneResolve = 0;
 				texSceneDepthResolve = 0;
 				fboShadowMap = 0;
@@ -1158,9 +1168,16 @@ public class HdPlugin extends Plugin {
 
 		uboLightsCulling = new UBOLights(true);
 		uboLightsCulling.initialize(UNIFORM_BLOCK_LIGHTS_CULLING);
+
+		debugProbe = new DebugProbe();
+		debugProbe.initialize();
 	}
 
 	private void destroyUbos() {
+		if (debugProbe != null)
+			debugProbe.destroy();
+		debugProbe = null;
+
 		if (uboGlobal != null)
 			uboGlobal.destroy();
 		uboGlobal = null;
@@ -1377,6 +1394,17 @@ public class HdPlugin extends Plugin {
 		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboSceneDepth);
 		checkGLErrors();
 
+		// Zone renderer only: second color attachment for the tagged-glow mask.
+		// R8 is enough for a [0..1] mask; MSAA-matched so the blend works the same
+		// way the main color attachment does.
+		if (isZoneRenderer) {
+			rboSceneTag = glGenRenderbuffers();
+			glBindRenderbuffer(GL_RENDERBUFFER, rboSceneTag);
+			glRenderbufferStorageMultisample(GL_RENDERBUFFER, msaaSamples, GL_R8, sceneResolution[0], sceneResolution[1]);
+			glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_RENDERBUFFER, rboSceneTag);
+			checkGLErrors();
+		}
+
 		// Create a resolve FBO: always texture-backed for the zone renderer (needed by the tonemap pass),
 		// or renderbuffer-backed when multisampling + resolution scaling is active under the legacy renderer.
 		boolean needsResolveFbo = isZoneRenderer || (msaaSamples > 1 && resolutionScale != 1);
@@ -1408,6 +1436,17 @@ public class HdPlugin extends Plugin {
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 				glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texSceneDepthResolve, 0);
+
+				// Tag mask resolve texture — tonemap pass samples this to apply tag-driven compensation.
+				texSceneTagResolve = glGenTextures();
+				glActiveTexture(TEXTURE_UNIT_TONEMAP_TAG);
+				glBindTexture(GL_TEXTURE_2D, texSceneTagResolve);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, sceneResolution[0], sceneResolution[1], 0, GL_RED, GL_UNSIGNED_BYTE, (ByteBuffer) null);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+				glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, texSceneTagResolve, 0);
 			} else {
 				rboSceneResolveColor = glGenRenderbuffers();
 				glBindRenderbuffer(GL_RENDERBUFFER, rboSceneResolveColor);
@@ -1437,6 +1476,10 @@ public class HdPlugin extends Plugin {
 			glDeleteRenderbuffers(rboSceneDepth);
 		rboSceneDepth = 0;
 
+		if (rboSceneTag != 0)
+			glDeleteRenderbuffers(rboSceneTag);
+		rboSceneTag = 0;
+
 		if (fboSceneResolve != 0)
 			glDeleteFramebuffers(fboSceneResolve);
 		fboSceneResolve = 0;
@@ -1452,6 +1495,10 @@ public class HdPlugin extends Plugin {
 		if (texSceneDepthResolve != 0)
 			glDeleteTextures(texSceneDepthResolve);
 		texSceneDepthResolve = 0;
+
+		if (texSceneTagResolve != 0)
+			glDeleteTextures(texSceneTagResolve);
+		texSceneTagResolve = 0;
 	}
 
 	private void initializeShadowMapFbo() {
@@ -1616,6 +1663,9 @@ public class HdPlugin extends Plugin {
 
 		glActiveTexture(TEXTURE_UNIT_TONEMAP_DEPTH);
 		glBindTexture(GL_TEXTURE_2D, texSceneDepthResolve);
+
+		glActiveTexture(TEXTURE_UNIT_TONEMAP_TAG);
+		glBindTexture(GL_TEXTURE_2D, texSceneTagResolve);
 
 		tonemapProgram.use();
 		glDisable(GL_BLEND);
