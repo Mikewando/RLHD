@@ -237,6 +237,8 @@ public class DebugProbe {
 		sb.append("  tonemap AgX final clamp        = ").append(rgb(s, 12)).append("\n");
 		sb.append("  tonemap linearToSrgb(AgX)      = ").append(rgb(s, 13)).append("\n");
 		sb.append("  legacy ref linearToSrgb(clamp) = ").append(rgb(s, 14)).append("\n");
+		sb.append("  post-comp AgX linear (mixed)  = ").append(rgb(s, 21)).append("\n");
+		sb.append("  post-comp display sRGB        = ").append(rgb(s, 22)).append("\n");
 		sb.append("  scene_frag outputColor post-blend pre-light  rgba=(")
 			.append(s[16 * 4]).append(", ").append(s[16 * 4 + 1]).append(", ")
 			.append(s[16 * 4 + 2]).append(") a=").append(s[16 * 4 + 3]).append("\n");
