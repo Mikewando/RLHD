@@ -36,16 +36,18 @@ void main() {
     // legacy clip+sRGB would have shown for the same pixel.
     vec3 agxOut = agxTonemap(linear);
 
-    // Tag-driven compensation. The R8 mask was written by scene_frag and
-    // alpha-blended through the scene pass; its value here is the fraction of the
-    // pixel's color that came from tagged geometry. Where tag > 0, mix AgX's
-    // output toward the literal legacy target = clamp(linear, 0, 1). Both values
-    // live in the same [0,1] display-linear space, so no gamut juggling is needed
-    // and the eventual display sRGB matches legacy clip+sRGB exactly at strength=1.
+    // Legacy-clip compensation. Two strengths combine additively (clamped to 1):
+    //   - agxLegacyMix: per-environment scalar set from environments.json; uniform
+    //     across the scene, lets a whole zone (e.g. TZHAAR) hard-clip highlights.
+    //   - tag * agxSurfaceVibrance: per-fragment, driven by the R8 tag mask that
+    //     scene_frag writes for fragments with attached lights.
+    // Both pull AgX's output toward clamp(linear, 0, 1) — the literal legacy
+    // target. At combined strength=1 the result matches legacy clip+sRGB exactly.
     float tag = texture(tagTex, fUv).r;
-    if (tag > 0.0 && agxSurfaceVibrance > 0.0) {
+    float effective = min(agxLegacyMix + tag * agxSurfaceVibrance, 1.0);
+    if (effective > 0.0) {
         vec3 legacyTarget = clamp(linear, 0.0, 1.0);
-        agxOut = mix(agxOut, legacyTarget, min(tag * agxSurfaceVibrance, 1.0));
+        agxOut = mix(agxOut, legacyTarget, effective);
     }
 
     // ── debug probe: replicate agxTonemap stages writing to SSBO ──
