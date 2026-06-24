@@ -1036,10 +1036,23 @@ public class SceneUploader implements AutoCloseable {
 		neHeight -= override.heightOffset;
 		nwHeight -= override.heightOffset;
 
-		int swMaterialData = swMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, swVertexIsOverlay);
-		int seMaterialData = seMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, seVertexIsOverlay);
-		int nwMaterialData = nwMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, nwVertexIsOverlay);
-		int neMaterialData = neMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, neVertexIsOverlay);
+		// Tile-level legacy-highlight tag. The per-material flag (bit 3 in
+		// MaterialStruct.flags) only fires when a tagged Material is actually
+		// assigned per-vertex. With configGroundTextures off, the engine's
+		// vanilla-texture path is the only assignment source — so newer vanilla
+		// overlays without a bound vanilla texture (e.g. eclipse moon overlay
+		// 334) stay at Material.NONE and miss the flag. Deriving the flag from
+		// the override's groundMaterial closes that gap: any tile pointing at a
+		// lava-flagged groundMaterial (e.g. HD_LAVA) gets the tag regardless of
+		// which Material the engine ends up rendering. Goes through the bit 7
+		// (vibrance-scaled) path same as attached-light objects.
+		final int tileMaterialDataExtraBits =
+			(override.groundMaterial != null && override.groundMaterial.legacyHighlightClip)
+				? Material.MATERIAL_FLAG_HAS_ATTACHED_LIGHT : 0;
+		int swMaterialData = swMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, swVertexIsOverlay) | tileMaterialDataExtraBits;
+		int seMaterialData = seMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, seVertexIsOverlay) | tileMaterialDataExtraBits;
+		int nwMaterialData = nwMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, nwVertexIsOverlay) | tileMaterialDataExtraBits;
+		int neMaterialData = neMaterial.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, neVertexIsOverlay) | tileMaterialDataExtraBits;
 
 		float uvcos = -uvScale, uvsin = 0;
 		if (uvOrientation % 2048 != 0) {
@@ -1347,9 +1360,13 @@ public class SceneUploader implements AutoCloseable {
 			ly1 -= override.heightOffset;
 			ly2 -= override.heightOffset;
 
-			int materialDataA = materialA.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexAIsOverlay);
-			int materialDataB = materialB.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexBIsOverlay);
-			int materialDataC = materialC.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexCIsOverlay);
+			// See uploadTilePaint for the rationale on this bit.
+			final int tileMaterialDataExtraBits =
+				(override.groundMaterial != null && override.groundMaterial.legacyHighlightClip)
+					? Material.MATERIAL_FLAG_HAS_ATTACHED_LIGHT : 0;
+			int materialDataA = materialA.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexAIsOverlay) | tileMaterialDataExtraBits;
+			int materialDataB = materialB.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexBIsOverlay) | tileMaterialDataExtraBits;
+			int materialDataC = materialC.packMaterialData(ModelOverride.NONE, UvType.GEOMETRY, vertexCIsOverlay) | tileMaterialDataExtraBits;
 
 			float uvcos = -uvScale, uvsin = 0;
 			if (uvOrientation % 2048 != 0) {

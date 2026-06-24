@@ -57,7 +57,7 @@ public class Material {
 	public boolean hasTransparency;
 	private boolean overrideBaseColor;
 	private boolean unlit;
-	private boolean legacyHighlightClip;
+	public boolean legacyHighlightClip;
 	@JsonAdapter(ColorUtils.LinearAdapter.class)
 	public float brightness = 1;
 	private float displacementScale = .1f;

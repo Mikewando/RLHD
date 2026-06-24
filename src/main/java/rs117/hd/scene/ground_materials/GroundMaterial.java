@@ -21,6 +21,13 @@ public class GroundMaterial {
 
 	public final String name;
 	private final Material[] materials;
+	/**
+	 * True if any material in this rotation has Material.legacyHighlightClip = true.
+	 * Used by SceneUploader to OR the legacy-highlight tag bit into tile materialData
+	 * for tile_overrides pointing at this groundMaterial, regardless of whether the
+	 * user has ground textures enabled (which gates the actual material assignment).
+	 */
+	public boolean legacyHighlightClip;
 
 	public GroundMaterial(String name, Material... materials) {
 		this.name = name;
@@ -31,6 +38,14 @@ public class GroundMaterial {
 		for (int j = 0; j < materials.length; j++)
 			if (materials[j] == null)
 				materials[j] = Material.NONE;
+
+		legacyHighlightClip = false;
+		for (Material m : materials) {
+			if (m.legacyHighlightClip) {
+				legacyHighlightClip = true;
+				break;
+			}
+		}
 	}
 
 	public Material getRandomMaterial(int[] worldPos) {
