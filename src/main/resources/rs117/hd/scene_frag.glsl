@@ -801,18 +801,25 @@ void main() {
         // pixels that the user never sees a tagged contribution at.
         // (Declared vec4 for driver compatibility — single-float outputs to R8
         // attachments were silently dropped on at least one Nvidia driver build.)
-        // Two contributions max-combined at write time:
-        //   - hasAttachedLight path: scaled by agxSurfaceVibrance AND brightness-gated
-        //     by outputColor.r (OKLab L) so invisible-but-tagged draws don't accumulate
-        //     (e.g. GOTR barrier dummy: lit colour 0, alpha ~0.004 — without the gate,
-        //     many transparent layers would compound a tag the user never visually
-        //     attributes to anything).
-        //   - legacyHighlightClip path: full strength, ungated. Lava and similar
-        //     opaque materials are fully visible by definition; the OKLab-L gate
-        //     would otherwise pull moderately-bright lava down (~0.7 instead of
-        //     1.0) and leak AgX through in environments where envMix=0.
-        float attached = _probeHasAttachedLightBlend * agxSurfaceVibrance * clamp(outputColor.r, 0.0, 1.0);
-        float tagContribution = max(attached, legacyHighlightBlend);
+        //
+        // Bit 7 (MATERIAL_FLAG_HAS_ATTACHED_LIGHT) has context-sensitive semantics
+        // based on isTerrain:
+        //   - On objects (isTerrain=false): bit 7 = "this object is tagged for
+        //     subtle glow compensation" (set by lights.json auto-tag or
+        //     ModelOverride.legacyHighlightClip). Goes through the vibrance×gate
+        //     path so the user's agxSurfaceVibrance slider tunes object glow and
+        //     so invisible-but-tagged transparent draws don't accumulate (e.g.
+        //     GOTR barrier dummy: lit colour 0, alpha ~0.004).
+        //   - On tiles (isTerrain=true): bit 7 = "this tile's groundMaterial is
+        //     explicitly tagged for legacy clip" (set by uploadTilePaint/Model
+        //     when groundMaterial.legacyHighlightClip is true). Promoted to the
+        //     full-strength legacyHighlightBlend path, matching how per-material
+        //     bit 3 already works for tiles that happen to get a flagged Material
+        //     assigned (e.g. karamja's vanilla-LAVA-texture path).
+        float tileFullStrength = isTerrain ? _probeHasAttachedLightBlend : 0.0;
+        float objectAttached = isTerrain ? 0.0 : _probeHasAttachedLightBlend;
+        float attached = objectAttached * agxSurfaceVibrance * clamp(outputColor.r, 0.0, 1.0);
+        float tagContribution = max(attached, max(legacyHighlightBlend, tileFullStrength));
         fragTag = vec4(tagContribution);
     #endif
 }
