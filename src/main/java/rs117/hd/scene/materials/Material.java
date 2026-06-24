@@ -57,6 +57,7 @@ public class Material {
 	public boolean hasTransparency;
 	private boolean overrideBaseColor;
 	private boolean unlit;
+	private boolean legacyHighlightClip;
 	@JsonAdapter(ColorUtils.LinearAdapter.class)
 	public float brightness = 1;
 	private float displacementScale = .1f;
@@ -215,6 +216,7 @@ public class Material {
 		struct.flowMap.set(getTextureLayer(flowMap));
 		struct.shadowAlphaMap.set(getTextureLayer(shadowAlphaMap));
 		struct.flags.set(
+			(legacyHighlightClip ? 1 : 0) << 3 |
 			(overrideBaseColor ? 1 : 0) << 2 |
 			(unlit ? 1 : 0) << 1 |
 			(hasTransparency ? 1 : 0)
