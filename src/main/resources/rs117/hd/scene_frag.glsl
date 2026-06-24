@@ -163,6 +163,11 @@ void main() {
     // Function-scope so the fragTag write at the end of main() can read it after
     // the terrain block closes. Populated inside #if !LEGACY_RENDERER terrain branch.
     float legacyHighlightBlend = 0.0;
+    // Per-fragment point-light luminance scaled by agxPointLightVibrance and clamped
+    // to [0,1]. Drives the same R8 tag attachment as the object/material paths so a
+    // strong coloured glow pushes nearby surfaces toward the legacy hard-clip+sRGB
+    // hue. Stays zero for water fragments (computed only in the terrain branch).
+    float pointLightTag = 0.0;
 
     Material material1 = getMaterial(fMaterialData[0] >> MATERIAL_INDEX_SHIFT & MATERIAL_INDEX_MASK);
     Material material2 = getMaterial(fMaterialData[1] >> MATERIAL_INDEX_SHIFT & MATERIAL_INDEX_MASK);
@@ -560,6 +565,17 @@ void main() {
         _probeUnlit = unlit;
         _probeCompositeLightLen = length(compositeLight);
 
+        // Point-light-driven legacy tag. Metric is the fraction of total composite
+        // light luminance contributed by point lights (diffuse + specular), so
+        // strong point lights in daylit overworld where sun/ambient dominate stay
+        // weakly tagged, while point lights in dark arenas (where they ARE most of
+        // the lighting) tag strongly. Pure point-light scenes converge on ratio=1.
+        vec3 luminanceWeights = vec3(0.2126, 0.7152, 0.0722);
+        float pointLightLum = dot(pointLightsOut + pointLightsSpecularOut, luminanceWeights);
+        float compositeLightLum = dot(compositeLight, luminanceWeights);
+        float pointLightFraction = pointLightLum / max(compositeLightLum, 1e-5);
+        pointLightTag = clamp(pointLightFraction * agxPointLightVibrance, 0.0, 1.0);
+
         #if VANILLA_COLOR_BANDING
             outputColor.rgb = linearToSrgb(outputColor.rgb);
             outputColor.rgb = srgbToHsv(outputColor.rgb);
@@ -818,8 +834,17 @@ void main() {
         //     assigned (e.g. karamja's vanilla-LAVA-texture path).
         float tileFullStrength = isTerrain ? _probeHasAttachedLightBlend : 0.0;
         float objectAttached = isTerrain ? 0.0 : _probeHasAttachedLightBlend;
-        float attached = objectAttached * agxSurfaceVibrance * clamp(outputColor.r, 0.0, 1.0);
-        float tagContribution = max(attached, max(legacyHighlightBlend, tileFullStrength));
+        // outputColor.r here is OKLab L (lightness); see the FBO-convention block above.
+        // Both the attached-light and point-light paths use it as a brightness gate so
+        // dim fragments don't get pushed toward the legacy hard-clip target, which is
+        // strictly darker than AgX below the per-channel clamp threshold.
+        float lightnessGate = clamp(outputColor.r, 0.0, 1.0);
+        float attached = objectAttached * agxSurfaceVibrance * lightnessGate;
+        float pointGated = pointLightTag * lightnessGate;
+        float tagContribution = max(
+            attached,
+            max(legacyHighlightBlend, max(tileFullStrength, pointGated))
+        );
         fragTag = vec4(tagContribution);
     #endif
 }
