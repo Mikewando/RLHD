@@ -10,7 +10,7 @@ struct Material {
     int ambientOcclusionMap;
     int flowMap;
     int shadowAlphaMap;
-    int flags; // overrideBaseColor << 2 | unlit << 1 | hasTransparency
+    int flags; // legacyHighlightClip << 3 | overrideBaseColor << 2 | unlit << 1 | hasTransparency
     float brightness;
     float displacementScale;
     float specularStrength;
@@ -37,4 +37,8 @@ int getMaterialIsUnlit(const Material material) {
 
 bool getMaterialHasTransparency(const Material material) {
     return (material.flags & 1) == 1;
+}
+
+int getMaterialIsLegacyClip(const Material material) {
+    return material.flags >> 3 & 1;
 }
