@@ -15,6 +15,7 @@ layout(std140) uniform UBOGlobal {
     float agxPunchPower;
     float agxLightCompensation;
     float agxSurfaceVibrance;
+    float agxLegacyMix;
     int debugAttachedLightTint;
     int debugProbeArm;
     ivec2 debugProbePixelScene;
