@@ -39,6 +39,7 @@ bool getMaterialHasTransparency(const Material material) {
     return (material.flags & 1) == 1;
 }
 
+// int (not bool) so callers can plug the result into vec3() per-channel blends, e.g. dot(IN.texBlend, vec3(...)) — matches getMaterialIsUnlit.
 int getMaterialIsLegacyClip(const Material material) {
     return material.flags >> 3 & 1;
 }
