@@ -43509,6 +43509,31 @@
     ]
   },
   {
+    "description": "Perilous Moons - Lava Rocks",
+    "baseMaterial": "ROCK_3",
+    "uvType": "BOX",
+    "uvScale": 0.86,
+    "legacyHighlightClip": true,
+    "objectIds": [
+      "ROCK_LAVA01_LARGE01",
+      "ROCK_LAVA01_LARGE02",
+      "ROCK_LAVA01_LARGE03",
+      "ROCK_LAVA01_MEDIUM01",
+      "ROCK_LAVA01_MEDIUM02",
+      "ROCK_LAVA01_MEDIUM03",
+      "ROCK_LAVA01_SMALL01",
+      "ROCK_LAVA01_SMALL02",
+      "ROCK_LAVA02_LARGE01",
+      "ROCK_LAVA02_LARGE02",
+      "ROCK_LAVA02_LARGE03",
+      "ROCK_LAVA02_MEDIUM01",
+      "ROCK_LAVA02_MEDIUM02",
+      "ROCK_LAVA02_MEDIUM03",
+      "ROCK_LAVA02_SMALL01",
+      "ROCK_LAVA02_SMALL02"
+    ]
+  },
+  {
     "description": "Perilous Moons - Camp - Stove",
     "baseMaterial": "GRUNGE_3",
     "objectIds": [
@@ -43605,14 +43630,6 @@
       "PMOON_TEMPLE_MOSS01_TALL",
       "PMOON_TEMPLE_MOSS02_TALL",
       "PMOON_TEMPLE_MOSS03_TALL",
-      "ROCK_LAVA01_LARGE01",
-      "ROCK_LAVA01_LARGE02",
-      "ROCK_LAVA01_LARGE03",
-      "ROCK_LAVA01_MEDIUM01",
-      "ROCK_LAVA01_MEDIUM02",
-      "ROCK_LAVA01_MEDIUM03",
-      "ROCK_LAVA01_SMALL01",
-      "ROCK_LAVA01_SMALL02",
       "ROR_RUBBLE01_LARGE01",
       "ROR_RUBBLE01_MEDIUM01",
       "ROR_RUBBLE01_SMALL01",
