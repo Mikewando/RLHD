@@ -802,14 +802,17 @@ void main() {
         // (Declared vec4 for driver compatibility — single-float outputs to R8
         // attachments were silently dropped on at least one Nvidia driver build.)
         // Two contributions max-combined at write time:
-        //   - hasAttachedLight path: scaled by agxSurfaceVibrance so the existing
-        //     tagged-glow tuning slider still controls these fragments.
-        //   - legacyHighlightClip path: always full strength (lava etc. are
-        //     explicitly tagged for full legacy treatment in materials.json).
-        // Brightness gate via outputColor.r (OKLab L clamped to [0,1]) still applies
-        // so invisible-but-tagged draws don't contribute (e.g. GOTR barrier dummy).
-        float attached = _probeHasAttachedLightBlend * agxSurfaceVibrance;
-        float tagContribution = max(attached, legacyHighlightBlend) * clamp(outputColor.r, 0.0, 1.0);
+        //   - hasAttachedLight path: scaled by agxSurfaceVibrance AND brightness-gated
+        //     by outputColor.r (OKLab L) so invisible-but-tagged draws don't accumulate
+        //     (e.g. GOTR barrier dummy: lit colour 0, alpha ~0.004 — without the gate,
+        //     many transparent layers would compound a tag the user never visually
+        //     attributes to anything).
+        //   - legacyHighlightClip path: full strength, ungated. Lava and similar
+        //     opaque materials are fully visible by definition; the OKLab-L gate
+        //     would otherwise pull moderately-bright lava down (~0.7 instead of
+        //     1.0) and leak AgX through in environments where envMix=0.
+        float attached = _probeHasAttachedLightBlend * agxSurfaceVibrance * clamp(outputColor.r, 0.0, 1.0);
+        float tagContribution = max(attached, legacyHighlightBlend);
         fragTag = vec4(tagContribution);
     #endif
 }
