@@ -235,6 +235,51 @@ public class ColorUtils {
 		return scene;
 	}
 
+	/**
+	 * Inverse of the luminance-scaled hard-clip "legacy target" used by
+	 * tonemap_frag when agxLegacyMix > 0. Forward (per fragment):
+	 *   lum    = dot(linear, w)
+	 *   lumOut = sigmoid(clamp((log2(lum) - minEv) / (maxEv - minEv), 0, 1))
+	 *   target = clamp(linear * (lumOut / lum), 0, 1)
+	 *
+	 * For non-clipping targets, all channels share a uniform scale k = lum/lumOut.
+	 * Summing for luminance gives lumOut = lumTarget, so:
+	 *   lumNorm = inverseSigmoid(lumTarget)
+	 *   lum     = 2^(minEv + lumNorm * (maxEv - minEv))
+	 *   k       = lum / lumTarget
+	 *   linear  = targetDisplayLinear * k
+	 *   hdrSky  = linear / exposure
+	 */
+	public static float[] agxLegacyInverseToHdrInput(
+		float[] targetDisplayLinear,
+		float minEv,
+		float maxEv,
+		float exposure
+	) {
+		float lwR = 0.2126f, lwG = 0.7152f, lwB = 0.0722f;
+		float lumTarget = lwR * targetDisplayLinear[0]
+			+ lwG * targetDisplayLinear[1]
+			+ lwB * targetDisplayLinear[2];
+		float invExp = 1f / Math.max(exposure, 1e-6f);
+		if (lumTarget < 1e-6f) {
+			// Target is essentially black; linear is also black regardless of scale.
+			return new float[] {
+				Math.max(targetDisplayLinear[0], 0f) * invExp,
+				Math.max(targetDisplayLinear[1], 0f) * invExp,
+				Math.max(targetDisplayLinear[2], 0f) * invExp
+			};
+		}
+		float lumNorm = inverseAgxSigmoid(lumTarget);
+		float logLum = minEv + lumNorm * (maxEv - minEv);
+		float lum = (float) Math.pow(2, logLum);
+		float k = lum / lumTarget;
+		return new float[] {
+			Math.max(targetDisplayLinear[0] * k, 0f) * invExp,
+			Math.max(targetDisplayLinear[1] * k, 0f) * invExp,
+			Math.max(targetDisplayLinear[2] * k, 0f) * invExp
+		};
+	}
+
 	// Inverse of agxLookPunchy. Forward per channel:
 	//   out_i = (1 - sat) * luma_in + sat * max(ldr_i, 0)^power
 	// where luma_in = dot(ldr, lw). Luma couples the channels, so iterate:

@@ -861,14 +861,36 @@ public class ZoneRenderer implements Renderer {
 		// reaching the RGBA16F framebuffer.
 		float[] clearOklab = { 0, 0, 0 };
 		if (!shouldRenderSkybox) {
-			float[] hdrSky = ColorUtils.agxInverseToHdrInput(
+			float minEv = (float) config.agxMinEv();
+			float maxEv = (float) config.agxMaxEv();
+			float exp = plugin.getExposure();
+			float[] hdrSkyAgx = ColorUtils.agxInverseToHdrInput(
 				environmentManager.currentFogColor,
-				(float) config.agxMinEv(),
-				(float) config.agxMaxEv(),
-				plugin.getExposure(),
+				minEv, maxEv, exp,
 				config.agxPunchSaturation() / 100f,
 				config.agxPunchPower() / 100f
 			);
+			// In environments with agxLegacyMix > 0 the tonemap_frag overwrites
+			// agxOut with the legacy-target transform, so the AgX-based inverse
+			// no longer produces the authored fog color. Lerp toward the
+			// legacy-target inverse by the same mix so sky matches in both
+			// regimes (exact at mix=0 and mix=1; approximate in between, which
+			// is acceptable per the per-environment design).
+			float mix = environmentManager.currentLegacyHighlightMix;
+			float[] hdrSky;
+			if (mix <= 0) {
+				hdrSky = hdrSkyAgx;
+			} else {
+				float[] hdrSkyLegacy = ColorUtils.agxLegacyInverseToHdrInput(
+					environmentManager.currentFogColor,
+					minEv, maxEv, exp
+				);
+				hdrSky = new float[] {
+					hdrSkyAgx[0] + (hdrSkyLegacy[0] - hdrSkyAgx[0]) * mix,
+					hdrSkyAgx[1] + (hdrSkyLegacy[1] - hdrSkyAgx[1]) * mix,
+					hdrSkyAgx[2] + (hdrSkyLegacy[2] - hdrSkyAgx[2]) * mix,
+				};
+			}
 			clearOklab = ColorUtils.linearToOklab(hdrSky);
 		}
 		glClearBufferfv(GL_COLOR, 0, new float[] { clearOklab[0], clearOklab[1], clearOklab[2], 1f });
