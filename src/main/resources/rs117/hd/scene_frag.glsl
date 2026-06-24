@@ -615,6 +615,19 @@ void main() {
                 debugProbeData[15].y = float(int(gl_FragCoord.y));
                 debugProbeData[15].z += 1.0; // shaderHits (scene)
             }
+
+            // Mirror legacy's RGBA8 clip-at-write behavior, but ONLY for tagged
+            // fragments. Without this, a tagged HDR-bright fragment with more than
+            // one channel above 1 (e.g. fire's lit (5.2, 0.69, 0.003) or the nagua
+            // ring's (6.93, 1.94, 0.002)) carries its full HDR magnitudes through
+            // the OKLab round-trip and the per-channel ratio survives the alpha
+            // blend. Legacy would have collapsed both over-1 channels to 1 at the
+            // RGBA8 storage write, making R = G in the encoded space and producing
+            // yellow after blending. Clamping linear to [0,1] here is equivalent
+            // pre-linearToSrgb (linearToSrgb is monotonic; clip-before is the same
+            // as clip-after for values in [0,1]). Untagged HDR scenery is unaffected
+            // and keeps its AgX rolloff at tonemap time.
+            outputColor.rgb = mix(outputColor.rgb, min(outputColor.rgb, vec3(1.0)), hasAttachedLightBlend);
         #endif
 
         // ─── transition LINEAR → sRGB-encoded ───

@@ -31,40 +31,21 @@ void main() {
     vec3 linearPre = oklabToLinear(oklab);
     vec3 linear = linearPre * exposure;
 
-    // Tag-driven AgX-time compensation. The R8 mask was written by scene_frag and
-    // alpha-blended through the scene pass, so its value at this pixel is the
-    // fraction of the pixel's color that came from tagged geometry. Where tag > 0
-    // we push the pre-AgX linear away from luma (hue-preserving chroma boost),
-    // scaled by the tag value and the agxSurfaceVibrance slider. See
-    // docs/agx-tag-mrt-plan.md and AgxOracleTest for the analysis behind this
-    // formula and its observed reach toward the legacy target.
+    // AgX gets the unmodified post-exposure linear. The tag-driven compensation
+    // happens AFTER AgX, on the already-tonemapped output, by mixing toward what
+    // legacy clip+sRGB would have shown for the same pixel.
+    vec3 agxOut = agxTonemap(linear);
+
+    // Tag-driven compensation. The R8 mask was written by scene_frag and
+    // alpha-blended through the scene pass; its value here is the fraction of the
+    // pixel's color that came from tagged geometry. Where tag > 0, mix AgX's
+    // output toward the literal legacy target = clamp(linear, 0, 1). Both values
+    // live in the same [0,1] display-linear space, so no gamut juggling is needed
+    // and the eventual display sRGB matches legacy clip+sRGB exactly at strength=1.
     float tag = texture(tagTex, fUv).r;
     if (tag > 0.0 && agxSurfaceVibrance > 0.0) {
-        // Compute chroma against the CLIPPED form so the direction matches what
-        // legacy clip+srgb would see, not the inflated HDR luma. For pixels that
-        // are already in [0,1] this is identical to linear's own chroma.
-        vec3 clipped = min(linear, vec3(1.0));
-        float luma = dot(clipped, vec3(0.2126, 0.7152, 0.0722));
-        vec3 chroma = clipped - vec3(luma);
-        // Gate by chroma magnitude — near-neutral pixels (e.g. white beam that
-        // overlaps a yellow torch glow) shouldn't have incidental tints amplified.
-        // TODO: tune thresholds in finished version.
-        float chromaGate = smoothstep(0.04, 0.20, length(chroma));
-        float strength = tag * agxSurfaceVibrance * chromaGate;
-
-        // Apply the chroma push to the CLIPPED reference. This is the saturated
-        // target the pixel should approach. For pixels already in [0,1] the clipped
-        // form equals linear, so this matches the previous "push from linear"
-        // behavior. For HDR-bright pixels (e.g. fire), the clipped form mirrors
-        // what legacy clip+sRGB would have shown — the dominant channel sits at
-        // 1.0 and the others stay at their authored values, preserving the
-        // artist's intended hue ratio.
-        vec3 saturated = max(clipped + chroma * strength, vec3(0.0));
-        // mix factor capped at 1: extrapolating past 1 drives the HDR-clipped
-        // channel negative (and clamp(0) turns the result into pure G/B neon).
-        // Vibrance > 100% still has an effect via the chroma-amount term above
-        // — it pushes chroma further from the clipped reference.
-        linear = mix(linear, saturated, min(strength, 1.0));
+        vec3 legacyTarget = clamp(linear, 0.0, 1.0);
+        agxOut = mix(agxOut, legacyTarget, min(tag * agxSurfaceVibrance, 1.0));
     }
 
     // ── debug probe: replicate agxTonemap stages writing to SSBO ──
@@ -78,9 +59,10 @@ void main() {
         vec3 v2 = agxDefaultContrastApprox(v1);
         vec3 v3 = agxLookPunchy(v2);
         vec3 v4 = AGX_OUTPUT_MATRIX * v3;
-        vec3 v5 = clamp(v4, vec3(0.0), vec3(1.0));
-        vec3 srgbAgx = linearToSrgb(v5);
-        vec3 srgbLegacy = linearToSrgb(clamp(linear, vec3(0.0), vec3(1.0)));
+        vec3 v5 = clamp(v4, vec3(0.0), vec3(1.0));   // uncompensated AgX output
+        vec3 srgbAgx = linearToSrgb(v5);              // what AgX alone would display
+        vec3 srgbLegacy = linearToSrgb(clamp(linear, vec3(0.0), vec3(1.0))); // legacy clip+srgb
+        vec3 srgbFinal = linearToSrgb(agxOut);        // post-compensation display
 
         debugProbeData[4]  = vec4(oklab, 0.0);
         debugProbeData[5]  = vec4(linearPre, exposure);
@@ -93,12 +75,14 @@ void main() {
         debugProbeData[12] = vec4(v5, 0.0);
         debugProbeData[13] = vec4(srgbAgx, 0.0);
         debugProbeData[14] = vec4(srgbLegacy, 0.0);
+        debugProbeData[21] = vec4(agxOut, 0.0);       // post-compensation linear
+        debugProbeData[22] = vec4(srgbFinal, 0.0);    // post-compensation display sRGB
         debugProbeData[15].x = float(int(gl_FragCoord.x));
         debugProbeData[15].y = float(int(gl_FragCoord.y));
         debugProbeData[15].z += 100.0; // shaderHits (tonemap)
     }
 
-    vec3 srgb = linearToSrgb(agxTonemap(linear));
+    vec3 srgb = linearToSrgb(agxOut);
 
     if (debugTagMask != 0) {
         // Replace the displayed image with the tagged-glow mask. White = fully tagged
