@@ -160,6 +160,9 @@ void main() {
     vec3 _probeBaseColor = vec3(0.0);
     int _probeColorMap1 = -2;
     int _probeColorMap2 = -2;
+    // Function-scope so the fragTag write at the end of main() can read it after
+    // the terrain block closes. Populated inside #if !LEGACY_RENDERER terrain branch.
+    float legacyHighlightBlend = 0.0;
 
     Material material1 = getMaterial(fMaterialData[0] >> MATERIAL_INDEX_SHIFT & MATERIAL_INDEX_MASK);
     Material material2 = getMaterial(fMaterialData[1] >> MATERIAL_INDEX_SHIFT & MATERIAL_INDEX_MASK);
@@ -595,6 +598,14 @@ void main() {
                 (fMaterialData[2] >> MATERIAL_FLAG_HAS_ATTACHED_LIGHT & 1)
             ));
             _probeHasAttachedLightBlend = hasAttachedLightBlend;
+            // Per-material legacy-clip signal: materials.json `legacyHighlightClip: true`
+            // packs MaterialStruct.flags bit 3, blended through IN.texBlend the same way
+            // unlit and hasAttachedLight are. Full-strength (1.0) contribution to fragTag.
+            legacyHighlightBlend = dot(IN.texBlend, vec3(
+                getMaterialIsLegacyClip(material1),
+                getMaterialIsLegacyClip(material2),
+                getMaterialIsLegacyClip(material3)
+            ));
             if (debugAttachedLightTint != 0 && hasAttachedLightBlend > 0.0) {
                 // Visual debug only: additive magenta wash over tagged fragments.
                 outputColor.rgb += vec3(5.0, 0.0, 5.0) * hasAttachedLightBlend;
@@ -790,7 +801,15 @@ void main() {
         // pixels that the user never sees a tagged contribution at.
         // (Declared vec4 for driver compatibility — single-float outputs to R8
         // attachments were silently dropped on at least one Nvidia driver build.)
-        float tagContribution = _probeHasAttachedLightBlend * clamp(outputColor.r, 0.0, 1.0);
+        // Two contributions max-combined at write time:
+        //   - hasAttachedLight path: scaled by agxSurfaceVibrance so the existing
+        //     tagged-glow tuning slider still controls these fragments.
+        //   - legacyHighlightClip path: always full strength (lava etc. are
+        //     explicitly tagged for full legacy treatment in materials.json).
+        // Brightness gate via outputColor.r (OKLab L clamped to [0,1]) still applies
+        // so invisible-but-tagged draws don't contribute (e.g. GOTR barrier dummy).
+        float attached = _probeHasAttachedLightBlend * agxSurfaceVibrance;
+        float tagContribution = max(attached, legacyHighlightBlend) * clamp(outputColor.r, 0.0, 1.0);
         fragTag = vec4(tagContribution);
     #endif
 }
