@@ -39,8 +39,10 @@ void main() {
     // Legacy-clip compensation. Two strengths combine additively (clamped to 1):
     //   - agxLegacyMix: per-environment scalar set from environments.json; uniform
     //     across the scene, lets a whole zone (e.g. TZHAAR) hard-clip highlights.
-    //   - tag * agxSurfaceVibrance: per-fragment, driven by the R8 tag mask that
-    //     scene_frag writes for fragments with attached lights.
+    //   - tag: per-fragment, written to the R8 tag mask by scene_frag. Combines
+    //     two upstream sources (max'd at write time): attached-light tagged
+    //     geometry scaled by agxSurfaceVibrance, and material/override-flagged
+    //     fragments at full strength.
     // Target construction: apply AgX's brightness response (log + EV normalise +
     // sigmoid) to LUMINANCE only, then scale the per-channel linear by that
     // response and hard-clip. This keeps the saturated legacy-clip hue shift
@@ -50,7 +52,7 @@ void main() {
     // never actually clip them and channel ratios would survive when the artist
     // intent is the legacy hue-collapse.
     float tag = texture(tagTex, fUv).r;
-    float effective = min(agxLegacyMix + tag * agxSurfaceVibrance, 1.0);
+    float effective = min(agxLegacyMix + tag, 1.0);
     if (effective > 0.0) {
         float lum = dot(linear, vec3(0.2126, 0.7152, 0.0722));
         float lumNorm = clamp((log2(max(lum, 1e-10)) - agxMinEv) / (agxMaxEv - agxMinEv), 0.0, 1.0);
