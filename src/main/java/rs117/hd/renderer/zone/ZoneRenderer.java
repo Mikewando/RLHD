@@ -621,6 +621,7 @@ public class ZoneRenderer implements Renderer {
 		plugin.uboGlobal.agxPunchPower.set(config.agxPunchPower() / 100f);
 		plugin.uboGlobal.agxLightCompensation.set(config.agxLightCompensation() / 100f);
 		plugin.uboGlobal.agxSurfaceVibrance.set(config.agxSurfaceVibrance() / 100f);
+		plugin.uboGlobal.agxLegacyMix.set(environmentManager.currentLegacyHighlightMix);
 		plugin.uboGlobal.debugAttachedLightTint.set(config.debugAttachedLightTint() ? 1 : 0);
 		if (plugin.debugProbe != null)
 			plugin.debugProbe.beginFrame();
