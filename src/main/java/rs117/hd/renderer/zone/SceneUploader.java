@@ -962,13 +962,16 @@ public class SceneUploader implements AutoCloseable {
 			}
 
 			if (blendColors) {
-				// Pull OKLab-averaged sRGB888 from the new map populated by
-				// ProceduralGenerator. Fragment shader decodes via
-				// srgbToLinear when isTerrain && waterType==0.
-				swColor = ctx.vertexTerrainColorSrgb.getOrDefault(swVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(swColor)));
-				seColor = ctx.vertexTerrainColorSrgb.getOrDefault(seVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(seColor)));
-				neColor = ctx.vertexTerrainColorSrgb.getOrDefault(neVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(neColor)));
-				nwColor = ctx.vertexTerrainColorSrgb.getOrDefault(nwVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(nwColor)));
+				// Pull OKLab-averaged sRGB888 from the map matching this tile's
+				// own tier so corner vertices shared with the opposite tier
+				// emit *this* tier's color when interpolated here. Fragment
+				// shader decodes via srgbToLinear when isTerrain && waterType==0.
+				boolean tileIsOverlay = override.queriedAsOverlay != override.blendedAsOpposite;
+				var srgbMap = tileIsOverlay ? ctx.vertexTerrainColorSrgbOverlay : ctx.vertexTerrainColorSrgbUnderlay;
+				swColor = srgbMap.getOrDefault(swVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(swColor)));
+				seColor = srgbMap.getOrDefault(seVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(seColor)));
+				neColor = srgbMap.getOrDefault(neVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(neColor)));
+				nwColor = srgbMap.getOrDefault(nwVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(nwColor)));
 			} else {
 				// Convert raw Jagex HSL to sRGB888 so terrain tiles use a uniform
 				// vertex color format regardless of blending.
@@ -1286,10 +1289,12 @@ public class SceneUploader implements AutoCloseable {
 				}
 
 				if (blendColors) {
-					// Pull OKLab-averaged sRGB888 from the new map (see uploadTilePaint).
-					colorA = ctx.vertexTerrainColorSrgb.getOrDefault(vertexKeyA, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorA)));
-					colorB = ctx.vertexTerrainColorSrgb.getOrDefault(vertexKeyB, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorB)));
-					colorC = ctx.vertexTerrainColorSrgb.getOrDefault(vertexKeyC, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorC)));
+					// Per-face tier picks the matching sRGB map (see uploadTilePaint).
+					boolean faceIsOverlay = isOverlay != override.blendedAsOpposite;
+					var srgbMap = faceIsOverlay ? ctx.vertexTerrainColorSrgbOverlay : ctx.vertexTerrainColorSrgbUnderlay;
+					colorA = srgbMap.getOrDefault(vertexKeyA, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorA)));
+					colorB = srgbMap.getOrDefault(vertexKeyB, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorB)));
+					colorC = srgbMap.getOrDefault(vertexKeyC, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorC)));
 				} else {
 					// Convert raw Jagex HSL to sRGB888 so terrain tile-models use a uniform
 					// vertex color format regardless of blending.

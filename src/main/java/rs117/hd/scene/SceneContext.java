@@ -72,11 +72,15 @@ public class SceneContext {
 	// Terrain data
 	public Int2ObjectHashMap<Material> vertexTerrainTexture;
 	public Int2IntHashMap vertexTerrainColor;
-	// Per-vertex OKLab-averaged ground color packed as 0xAARRGGBB (sRGB-encoded
-	// bytes + alpha bias). Zone renderer reads this for blended ground; legacy
-	// renderer keeps using vertexTerrainColor (packed HSL) with the existing
-	// "reverse vanilla shading" lightening applied.
-	public Int2IntHashMap vertexTerrainColorSrgb;
+	// Per-tier per-vertex OKLab-averaged ground colors, packed as 0x00RRGGBB
+	// sRGB-encoded bytes. The zone renderer's SceneUploader pulls from the map
+	// matching the rendering tile's own tier so a boundary corner shared by an
+	// overlay and an underlay emits *different* colors when interpolated by each
+	// tile — eliminating cross-tier color bleed (the "spike" artifact) at the
+	// cost of sharp tile-boundary edges (which match the blend-off look).
+	// Legacy renderer keeps using vertexTerrainColor (packed HSL).
+	public Int2IntHashMap vertexTerrainColorSrgbOverlay;
+	public Int2IntHashMap vertexTerrainColorSrgbUnderlay;
 	public Int2IntHashMap vertexTerrainData;
 	public Int2IntHashMap vertexTerrainNormalIndices;
 	public short[] vertexTerrainNormals;
