@@ -281,28 +281,53 @@ void main() {
             fragPos += TBN * fragDelta;
         #endif
 
-        vec3 hsl1 = unpackRawHsl(fAlphaBiasHsl[0]);
-        vec3 hsl2 = unpackRawHsl(fAlphaBiasHsl[1]);
-        vec3 hsl3 = unpackRawHsl(fAlphaBiasHsl[2]);
-
-        // Apply entity tint to HSL
+        // Entity tint is consumed both here (HSL path) and later in the
+        // lighting block (`if (tint.w > 0)` at the skyLight branch), so keep
+        // it at function scope.
         ivec4 tint = getWorldViewTint(fWorldViewId);
-        if (tint.w > 0) {
-            hsl1 += ((tint.xyz - hsl1) * tint.w) / 128;
-            hsl2 += ((tint.xyz - hsl2) * tint.w) / 128;
-            hsl3 += ((tint.xyz - hsl3) * tint.w) / 128;
+
+        // Ground terrain tiles (isTerrain && waterType==0) store vertex colors
+        // as 0x00RRGGBB sRGB-encoded bytes — the result of CPU-side OKLab
+        // averaging (blend on) or raw HSL conversion (blend off). Decode
+        // directly to linear, skipping the Jagex HSL chain. Entity tint
+        // doesn't apply to terrain tiles.
+        // Everything else (models, water, underwater) keeps the existing
+        // packed-HSL decode path.
+        //
+        // LEGACY_RENDERER must stay on the HSL chain because its uploader
+        // (LegacySceneUploader) still feeds Jagex packed HSL into the vertex
+        // color slot — only the zone renderer's SceneUploader writes sRGB888.
+        #if LEGACY_RENDERER
+            bool isGroundTile = false;
+        #else
+            bool isGroundTile = isTerrain && waterTypeIndex == 0;
+        #endif
+
+        vec4 baseColor1, baseColor2, baseColor3;
+        if (isGroundTile) {
+            vec3 srgb1 = vec3((fAlphaBiasHsl[0] >> 16) & 0xff, (fAlphaBiasHsl[0] >> 8) & 0xff, fAlphaBiasHsl[0] & 0xff) / 255.;
+            vec3 srgb2 = vec3((fAlphaBiasHsl[1] >> 16) & 0xff, (fAlphaBiasHsl[1] >> 8) & 0xff, fAlphaBiasHsl[1] & 0xff) / 255.;
+            vec3 srgb3 = vec3((fAlphaBiasHsl[2] >> 16) & 0xff, (fAlphaBiasHsl[2] >> 8) & 0xff, fAlphaBiasHsl[2] & 0xff) / 255.;
+            baseColor1 = vec4(srgbToLinear(srgb1), 1 - float(fAlphaBiasHsl[0] >> 24 & 0xff) / 255.);
+            baseColor2 = vec4(srgbToLinear(srgb2), 1 - float(fAlphaBiasHsl[1] >> 24 & 0xff) / 255.);
+            baseColor3 = vec4(srgbToLinear(srgb3), 1 - float(fAlphaBiasHsl[2] >> 24 & 0xff) / 255.);
+        } else {
+            vec3 hsl1 = unpackRawHsl(fAlphaBiasHsl[0]);
+            vec3 hsl2 = unpackRawHsl(fAlphaBiasHsl[1]);
+            vec3 hsl3 = unpackRawHsl(fAlphaBiasHsl[2]);
+
+            // Apply entity tint to HSL
+            if (tint.w > 0) {
+                hsl1 += ((tint.xyz - hsl1) * tint.w) / 128;
+                hsl2 += ((tint.xyz - hsl2) * tint.w) / 128;
+                hsl3 += ((tint.xyz - hsl3) * tint.w) / 128;
+            }
+
+            // Jagex HSL → sRGB → LINEAR.
+            baseColor1 = vec4(srgbToLinear(hslToSrgb(convertHsl(hsl1))), 1 - float(fAlphaBiasHsl[0] >> 24 & 0xff) / 255.);
+            baseColor2 = vec4(srgbToLinear(hslToSrgb(convertHsl(hsl2))), 1 - float(fAlphaBiasHsl[1] >> 24 & 0xff) / 255.);
+            baseColor3 = vec4(srgbToLinear(hslToSrgb(convertHsl(hsl3))), 1 - float(fAlphaBiasHsl[2] >> 24 & 0xff) / 255.);
         }
-
-        // get vertex colors
-        vec4 baseColor1 = vec4(convertHsl(hsl1), 1 - float(fAlphaBiasHsl[0] >> 24 & 0xff) / 255.);
-        vec4 baseColor2 = vec4(convertHsl(hsl2), 1 - float(fAlphaBiasHsl[1] >> 24 & 0xff) / 255.);
-        vec4 baseColor3 = vec4(convertHsl(hsl3), 1 - float(fAlphaBiasHsl[2] >> 24 & 0xff) / 255.);
-
-        // Jagex HSL (from convertHsl) → sRGB-encoded → LINEAR. baseColor* is
-        // now LINEAR albedo, ready to multiply against texture & lighting.
-        baseColor1.rgb = srgbToLinear(hslToSrgb(baseColor1.xyz));
-        baseColor2.rgb = srgbToLinear(hslToSrgb(baseColor2.xyz));
-        baseColor3.rgb = srgbToLinear(hslToSrgb(baseColor3.xyz));
 
         #if DISPLAY_BASE_COLOR
         if (DISPLAY_BASE_COLOR == 1) { // Redundant, used for syntax highlighting in IntelliJ

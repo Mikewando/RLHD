@@ -564,6 +564,46 @@ public class ProceduralGenerator {
 	}
 
 	final class TerrainDataGenerator {
+		// Priority tiers for OKLab averaging. A higher-priority contribution
+		// resets the accumulator; lower-priority contributions are ignored
+		// once a higher tier has appeared. Matches the existing
+		// overlay-overwrites-underlay + high-priority-overrides-low-priority
+		// semantics of the HSL vertexTerrainColor map.
+		private static final int OKLAB_PRIORITY_LOW_UNDERLAY = 0;
+		private static final int OKLAB_PRIORITY_HIGH_UNDERLAY = 1;
+		private static final int OKLAB_PRIORITY_OVERLAY = 2;
+
+		/**
+		 * Mutable per-vertex accumulator for OKLab-averaged ground colors.
+		 * Stored in oklabAccumulators (Int2ObjectHashMap keyed by vertex hash).
+		 */
+		private final class OklabAccumulator {
+			float sumL, sumA, sumB;
+			int count;
+			int priority = -1; // -1 = empty
+
+			void add(float L, float a, float b, int contributionPriority) {
+				if (contributionPriority < priority)
+					return; // dominated by higher-priority contributions
+				if (contributionPriority > priority) {
+					sumL = sumA = sumB = 0;
+					count = 0;
+					priority = contributionPriority;
+				}
+				sumL += L;
+				sumA += a;
+				sumB += b;
+				count++;
+			}
+
+			int finalizeToPackedSrgb() {
+				float invN = 1f / count;
+				float[] oklab = { sumL * invN, sumA * invN, sumB * invN };
+				float[] linear = ColorUtils.oklabToLinear(oklab);
+				return ColorUtils.packSrgb(ColorUtils.linearToSrgb(linear));
+			}
+		}
+
 		private final int[][] vertices = new int[4][3];
 		private final int[] hashes = new int[4];
 		private final int[] worldPos = new int[3];
@@ -575,6 +615,8 @@ public class ProceduralGenerator {
 		private boolean[] vertexIsOverlay;
 		private boolean[] vertexDefaultColor;
 
+		private Int2ObjectHashMap<OklabAccumulator> oklabAccumulators;
+
 		/**
 		 * Iterates through all Tiles in a given Scene, producing color and
 		 * material data for each vertex of each Tile. Then adds the resulting
@@ -582,7 +624,9 @@ public class ProceduralGenerator {
 		 */
 		private void generate(SceneContext sceneContext, SceneContext prevSceneCtx) {
 			sceneContext.vertexTerrainColor = new Int2IntHashMap(prevSceneCtx != null && prevSceneCtx.vertexTerrainColor != null ? prevSceneCtx.vertexTerrainColor.capacity() : 0);
+			sceneContext.vertexTerrainColorSrgb = new Int2IntHashMap(prevSceneCtx != null && prevSceneCtx.vertexTerrainColorSrgb != null ? prevSceneCtx.vertexTerrainColorSrgb.capacity() : 0);
 			sceneContext.vertexTerrainTexture = new Int2ObjectHashMap<>(prevSceneCtx != null && prevSceneCtx.vertexTerrainTexture != null ? prevSceneCtx.vertexTerrainTexture.capacity() : 0);
+			oklabAccumulators = new Int2ObjectHashMap<>(sceneContext.vertexTerrainColorSrgb.capacity());
 
 			final Tile[][][] tiles = sceneContext.scene.getExtendedTiles();
 			for (int z = 0; z < MAX_Z; ++z) {
@@ -602,6 +646,12 @@ public class ProceduralGenerator {
 					}
 				}
 			}
+
+			// Finalize per-vertex OKLab accumulators into packed sRGB888 ints
+			// consumed by the zone renderer's blended-ground path.
+			for (var entry : oklabAccumulators)
+				sceneContext.vertexTerrainColorSrgb.put(entry.getKey(), entry.getValue().finalizeToPackedSrgb());
+			oklabAccumulators = null;
 		}
 
 		/**
@@ -778,6 +828,26 @@ public class ProceduralGenerator {
 
 					if (!lowPriorityColor)
 						sceneContext.setVertexHighPriorityColor(key);
+
+					// Parallel OKLab accumulation for the zone renderer's blended
+					// ground path. Skip the "reverse vanilla shading" lightening
+					// (used by the HSL/legacy path above) and feed the raw
+					// override-modified color so blend-on matches blend-off
+					// brightness. Priority tier mirrors the existing
+					// overlay-overwrites-underlay + high-priority-wins logic, so
+					// later higher-priority contributions reset the accumulator.
+					int srgbContribution = override.modifyColor(vertexColors[vertex]);
+					float[] linearRgb = ColorUtils.packedHslToLinearRgb(srgbContribution);
+					float[] oklab = ColorUtils.linearToOklab(linearRgb);
+					int tier = isOverlay
+						? OKLAB_PRIORITY_OVERLAY
+						: lowPriorityColor ? OKLAB_PRIORITY_LOW_UNDERLAY : OKLAB_PRIORITY_HIGH_UNDERLAY;
+					var acc = oklabAccumulators.get(key);
+					if (acc == null) {
+						acc = new OklabAccumulator();
+						oklabAccumulators.put(key, acc);
+					}
+					acc.add(oklab[0], oklab[1], oklab[2], tier);
 				}
 			}
 		}
