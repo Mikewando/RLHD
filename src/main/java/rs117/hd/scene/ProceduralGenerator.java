@@ -564,6 +564,44 @@ public class ProceduralGenerator {
 	}
 
 	final class TerrainDataGenerator {
+		// Priority tiers used within the underlay accumulator. High-priority
+		// (non-near-black) underlay contributions reset the accumulator if a
+		// low-priority one had been added; low-priority is ignored once high
+		// has appeared. The overlay accumulator only ever uses a single tier.
+		private static final int OKLAB_PRIORITY_LOW = 0;
+		private static final int OKLAB_PRIORITY_HIGH = 1;
+
+		/**
+		 * Mutable per-vertex accumulator for OKLab-averaged ground colors.
+		 * One accumulator map per tier (overlay / underlay); see Int2ObjectHashMap fields.
+		 */
+		private final class OklabAccumulator {
+			float sumL, sumA, sumB;
+			int count;
+			int priority = -1; // -1 = empty
+
+			void add(float L, float a, float b, int contributionPriority) {
+				if (contributionPriority < priority)
+					return; // dominated by higher-priority contributions
+				if (contributionPriority > priority) {
+					sumL = sumA = sumB = 0;
+					count = 0;
+					priority = contributionPriority;
+				}
+				sumL += L;
+				sumA += a;
+				sumB += b;
+				count++;
+			}
+
+			int finalizeToPackedSrgb() {
+				float invN = 1f / count;
+				float[] oklab = { sumL * invN, sumA * invN, sumB * invN };
+				float[] linear = ColorUtils.oklabToLinear(oklab);
+				return ColorUtils.packSrgb(ColorUtils.linearToSrgb(linear));
+			}
+		}
+
 		private final int[][] vertices = new int[4][3];
 		private final int[] hashes = new int[4];
 		private final int[] worldPos = new int[3];
@@ -575,6 +613,9 @@ public class ProceduralGenerator {
 		private boolean[] vertexIsOverlay;
 		private boolean[] vertexDefaultColor;
 
+		private Int2ObjectHashMap<OklabAccumulator> oklabAccumulatorsOverlay;
+		private Int2ObjectHashMap<OklabAccumulator> oklabAccumulatorsUnderlay;
+
 		/**
 		 * Iterates through all Tiles in a given Scene, producing color and
 		 * material data for each vertex of each Tile. Then adds the resulting
@@ -582,7 +623,11 @@ public class ProceduralGenerator {
 		 */
 		private void generate(SceneContext sceneContext, SceneContext prevSceneCtx) {
 			sceneContext.vertexTerrainColor = new Int2IntHashMap(prevSceneCtx != null && prevSceneCtx.vertexTerrainColor != null ? prevSceneCtx.vertexTerrainColor.capacity() : 0);
+			sceneContext.vertexTerrainColorSrgbOverlay = new Int2IntHashMap(prevSceneCtx != null && prevSceneCtx.vertexTerrainColorSrgbOverlay != null ? prevSceneCtx.vertexTerrainColorSrgbOverlay.capacity() : 0);
+			sceneContext.vertexTerrainColorSrgbUnderlay = new Int2IntHashMap(prevSceneCtx != null && prevSceneCtx.vertexTerrainColorSrgbUnderlay != null ? prevSceneCtx.vertexTerrainColorSrgbUnderlay.capacity() : 0);
 			sceneContext.vertexTerrainTexture = new Int2ObjectHashMap<>(prevSceneCtx != null && prevSceneCtx.vertexTerrainTexture != null ? prevSceneCtx.vertexTerrainTexture.capacity() : 0);
+			oklabAccumulatorsOverlay = new Int2ObjectHashMap<>(sceneContext.vertexTerrainColorSrgbOverlay.capacity());
+			oklabAccumulatorsUnderlay = new Int2ObjectHashMap<>(sceneContext.vertexTerrainColorSrgbUnderlay.capacity());
 
 			final Tile[][][] tiles = sceneContext.scene.getExtendedTiles();
 			for (int z = 0; z < MAX_Z; ++z) {
@@ -602,6 +647,17 @@ public class ProceduralGenerator {
 					}
 				}
 			}
+
+			// Finalize per-vertex OKLab accumulators into packed sRGB888 ints
+			// consumed by the zone renderer's blended-ground path. The two
+			// maps stay separate so each tile reads from the map matching
+			// its own tier — no overlay/underlay color bleed at boundaries.
+			for (var entry : oklabAccumulatorsOverlay)
+				sceneContext.vertexTerrainColorSrgbOverlay.put(entry.getKey(), entry.getValue().finalizeToPackedSrgb());
+			for (var entry : oklabAccumulatorsUnderlay)
+				sceneContext.vertexTerrainColorSrgbUnderlay.put(entry.getKey(), entry.getValue().finalizeToPackedSrgb());
+			oklabAccumulatorsOverlay = null;
+			oklabAccumulatorsUnderlay = null;
 		}
 
 		/**
@@ -778,6 +834,30 @@ public class ProceduralGenerator {
 
 					if (!lowPriorityColor)
 						sceneContext.setVertexHighPriorityColor(key);
+
+					// Per-tier OKLab accumulation for the zone renderer's blended
+					// ground path. Skip the "reverse vanilla shading" lightening
+					// (used by the HSL/legacy path above) and feed the raw
+					// override-modified color so blend-on matches blend-off
+					// brightness. Overlay and underlay contributions accumulate
+					// into separate maps; the rendering tile pulls from the map
+					// matching its own tier. Within the underlay map, the
+					// low/high-priority promotion mirrors the HSL path so
+					// near-solid-black "under-wall" tiles get overridden by
+					// high-priority neighbours.
+					int srgbContribution = override.modifyColor(vertexColors[vertex]);
+					float[] linearRgb = ColorUtils.packedHslToLinearRgb(srgbContribution);
+					float[] oklab = ColorUtils.linearToOklab(linearRgb);
+					var accumulators = isOverlay ? oklabAccumulatorsOverlay : oklabAccumulatorsUnderlay;
+					int tier = isOverlay
+						? OKLAB_PRIORITY_HIGH
+						: lowPriorityColor ? OKLAB_PRIORITY_LOW : OKLAB_PRIORITY_HIGH;
+					var acc = accumulators.get(key);
+					if (acc == null) {
+						acc = new OklabAccumulator();
+						accumulators.put(key, acc);
+					}
+					acc.add(oklab[0], oklab[1], oklab[2], tier);
 				}
 			}
 		}
