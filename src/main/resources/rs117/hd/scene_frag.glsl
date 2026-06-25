@@ -566,15 +566,20 @@ void main() {
         _probeCompositeLightLen = length(compositeLight);
 
         // Point-light-driven legacy tag. Metric is the fraction of total composite
-        // light luminance contributed by point lights (diffuse + specular), so
-        // strong point lights in daylit overworld where sun/ambient dominate stay
-        // weakly tagged, while point lights in dark arenas (where they ARE most of
-        // the lighting) tag strongly. Pure point-light scenes converge on ratio=1.
+        // light luminance contributed by point lights (diffuse + specular), passed
+        // through a smoothstep so the transition between "sun-dominated" and
+        // "point-light-dominated" is sharp instead of linear. Sample-derived cuts:
+        // overworld with strong point light measures ratio ≈ 0.37 (want ~0), eclipse
+        // moon attack ≈ 0.69 (want ~1). smoothstep(0.3, 0.7) hits both: 0.37 → 0.08,
+        // 0.69 → 1.00. Slider is a linear multiplier on the curve output.
         vec3 luminanceWeights = vec3(0.2126, 0.7152, 0.0722);
         float pointLightLum = dot(pointLightsOut + pointLightsSpecularOut, luminanceWeights);
         float compositeLightLum = dot(compositeLight, luminanceWeights);
         float pointLightFraction = pointLightLum / max(compositeLightLum, 1e-5);
-        pointLightTag = clamp(pointLightFraction * agxPointLightVibrance, 0.0, 1.0);
+        pointLightTag = clamp(
+            smoothstep(0.3, 0.7, pointLightFraction) * agxPointLightVibrance,
+            0.0, 1.0
+        );
 
         #if VANILLA_COLOR_BANDING
             outputColor.rgb = linearToSrgb(outputColor.rgb);
