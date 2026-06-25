@@ -121,7 +121,17 @@ layout (location = 0) in vec3 vPosition;
         #endif
 
         vec4 clipPosition = projectionMatrix * vec4(worldPosition, 1.0);
-        int depthBias = (alphaBiasHsl >> 16) & 0xff;
+
+        // Ground terrain tiles repurpose bits 16-23 of alphaBiasHsl as the
+        // sRGB R channel (see scene_frag.glsl color decode). Skip depthBias
+        // for those vertices so the encoded color doesn't shift geometry.
+        // Models (isTerrain=false) and water-typed tiles (waterType > 0) keep
+        // depthBias enabled — the only legitimate depthBias sources today.
+        int myTerrainData = isProvoking
+            ? fTerrainData[vertex]
+            : texelFetch(textureFaces, vTextureFaceIdx + 2)[vertex];
+        bool isGroundTile = (myTerrainData & 1) != 0 && ((myTerrainData >> 3) & 0xFF) == 0;
+        int depthBias = isGroundTile ? 0 : (alphaBiasHsl >> 16) & 0xff;
         if (projectionMatrix[2][3] != 0) // Disable depth bias for orthographic projection
             clipPosition.z += depthBias / 128.0;
 

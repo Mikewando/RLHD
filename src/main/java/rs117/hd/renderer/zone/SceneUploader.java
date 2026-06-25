@@ -45,6 +45,7 @@ import rs117.hd.scene.model_overrides.TzHaarRecolorType;
 import rs117.hd.scene.model_overrides.UvType;
 import rs117.hd.scene.tile_overrides.TileOverride;
 import rs117.hd.scene.water_types.WaterType;
+import rs117.hd.utils.ColorUtils;
 import rs117.hd.utils.HDUtils;
 import rs117.hd.utils.ModelHash;
 import rs117.hd.utils.buffer.GpuIntBuffer;
@@ -961,10 +962,20 @@ public class SceneUploader implements AutoCloseable {
 			}
 
 			if (blendColors) {
-				swColor = ctx.vertexTerrainColor.getOrDefault(swVertexKey, swColor);
-				seColor = ctx.vertexTerrainColor.getOrDefault(seVertexKey, seColor);
-				neColor = ctx.vertexTerrainColor.getOrDefault(neVertexKey, neColor);
-				nwColor = ctx.vertexTerrainColor.getOrDefault(nwVertexKey, nwColor);
+				// Pull OKLab-averaged sRGB888 from the new map populated by
+				// ProceduralGenerator. Fragment shader decodes via
+				// srgbToLinear when isTerrain && waterType==0.
+				swColor = ctx.vertexTerrainColorSrgb.getOrDefault(swVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(swColor)));
+				seColor = ctx.vertexTerrainColorSrgb.getOrDefault(seVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(seColor)));
+				neColor = ctx.vertexTerrainColorSrgb.getOrDefault(neVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(neColor)));
+				nwColor = ctx.vertexTerrainColorSrgb.getOrDefault(nwVertexKey, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(nwColor)));
+			} else {
+				// Convert raw Jagex HSL to sRGB888 so terrain tiles use a uniform
+				// vertex color format regardless of blending.
+				swColor = ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(swColor));
+				seColor = ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(seColor));
+				neColor = ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(neColor));
+				nwColor = ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(nwColor));
 			}
 
 			if (plugin.configGroundTextures) {
@@ -1275,9 +1286,16 @@ public class SceneUploader implements AutoCloseable {
 				}
 
 				if (blendColors) {
-					colorA = ctx.vertexTerrainColor.getOrDefault(vertexKeyA, colorA);
-					colorB = ctx.vertexTerrainColor.getOrDefault(vertexKeyB, colorB);
-					colorC = ctx.vertexTerrainColor.getOrDefault(vertexKeyC, colorC);
+					// Pull OKLab-averaged sRGB888 from the new map (see uploadTilePaint).
+					colorA = ctx.vertexTerrainColorSrgb.getOrDefault(vertexKeyA, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorA)));
+					colorB = ctx.vertexTerrainColorSrgb.getOrDefault(vertexKeyB, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorB)));
+					colorC = ctx.vertexTerrainColorSrgb.getOrDefault(vertexKeyC, ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorC)));
+				} else {
+					// Convert raw Jagex HSL to sRGB888 so terrain tile-models use a uniform
+					// vertex color format regardless of blending.
+					colorA = ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorA));
+					colorB = ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorB));
+					colorC = ColorUtils.packSrgb(ColorUtils.packedHslToSrgb(colorC));
 				}
 
 				if (plugin.configGroundTextures) {
