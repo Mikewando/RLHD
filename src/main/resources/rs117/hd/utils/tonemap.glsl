@@ -11,6 +11,7 @@
 #pragma once
 
 #include <uniforms/global.glsl>
+#include <utils/color_utils.glsl>
 
 const mat3 AGX_INPUT_MATRIX = mat3(
     0.842479062253094, 0.0784335999999992, 0.0792237451477643,
@@ -44,18 +45,15 @@ vec3 agxDefaultContrastApprox(vec3 x) {
 // to the post-sigmoid linear value before the output matrix. agxPunchSaturation
 // and agxPunchPower come from the UBO; both at 1.0 are no-op.
 vec3 agxLookPunchy(vec3 ldr) {
-    const vec3 lw = vec3(0.2126, 0.7152, 0.0722);
-    float luma = dot(ldr, lw);
+    float luma = dot(ldr, REC709_LUMA);
     ldr = max(ldr, vec3(0.0)); // pow(neg, non-int) -> NaN
     vec3 graded = pow(ldr, vec3(agxPunchPower));
     return luma + agxPunchSaturation * (graded - luma);
 }
 
-// (Previously the GLSL port of ColorUtils.agxInverseToHdrInput lived here, used
-// by an earlier per-fragment compensation in scene_frag. That approach is now
-// replaced by the MRT tag-mask + tonemap-time saturation compensation; see
-// docs/agx-tag-mrt-plan.md. The Java CPU-side ColorUtils.agxInverseToHdrInput
-// still exists for the sky clear-color computation in ZoneRenderer.scenePass.)
+// The Java CPU-side ColorUtils.agxInverseToHdrInput exists for the sky
+// clear-color computation in ZoneRenderer.scenePass — see docs/agx-legacy-mix.md
+// for the overall AgX + legacy-mix design.
 
 vec3 agxTonemap(vec3 hdr) {
     // Guard against negatives that would break the log

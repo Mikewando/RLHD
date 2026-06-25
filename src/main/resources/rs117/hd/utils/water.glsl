@@ -37,10 +37,6 @@
 vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     WaterType waterType = getWaterType(waterTypeIndex);
 
-    vec3 wSurfaceColor = waterType.surfaceColor;
-    vec3 wFoamColor    = waterType.foamColor;
-    vec3 wDepthColor   = waterType.depthColor;
-
     vec2 uv1 = worldUvs(3).yx - animationFrame(28 * waterType.duration);
     vec2 uv2 = worldUvs(3) + animationFrame(24 * waterType.duration);
     vec2 uv3 = IN.uv;
@@ -89,10 +85,9 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     vec3 lightColor = dirLightColor;
     vec3 lightOut = max(lightDotNormals, 0.0) * lightColor;
 
-    // directional light specular (specVal kept around for debug overlay readout)
+    // directional light specular
     vec3 lightReflectDir = reflect(-lightDir, normals);
-    float specVal = specular(IN.texBlend, viewDir, lightReflectDir, vSpecularGloss, vSpecularStrength);
-    vec3 lightSpecularOut = lightColor * specVal;
+    vec3 lightSpecularOut = lightColor * specular(IN.texBlend, viewDir, lightReflectDir, vSpecularGloss, vSpecularStrength);
 
     // point lights
     vec3 pointLightsOut = vec3(0);
@@ -137,7 +132,7 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     vec3 compositeLight = ambientLightOut + lightOut + lightSpecularOut + skyLightOut + lightningOut +
     underglowOut + pointLightsOut + pointLightsSpecularOut + surfaceColorOut;
 
-    vec3 baseColor = wSurfaceColor * compositeLight;
+    vec3 baseColor = waterType.surfaceColor * compositeLight;
     baseColor = mix(baseColor, surfaceColor, waterType.fresnelAmount);
     if (waterType.fresnelAmount == 0.85)
         baseColor *= .75f; // Sailing hack
@@ -145,7 +140,7 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     float maxFoamAmount = 0.8;
     float foamAmount = min(shoreLineMask, maxFoamAmount);
     float foamDistance = 0.7;
-    vec3 foamColor = wFoamColor;
+    vec3 foamColor = waterType.foamColor;
     foamColor = foamColor * foamMask * compositeLight;
     foamAmount = clamp(pow(1.0 - ((1.0 - foamAmount) / foamDistance), 3), 0.0, 1.0) * waterType.hasFoam;
     foamAmount *= foamColor.r;
@@ -159,7 +154,7 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     float alpha = max(waterType.baseOpacity, max(foamAmount, max(finalFresnel, length(specularComposite / 3))));
 
     if (waterType.isFlat) {
-        baseColor = mix(wDepthColor, baseColor, alpha);
+        baseColor = mix(waterType.depthColor, baseColor, alpha);
         alpha = 1;
     }
 
@@ -172,8 +167,11 @@ void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, 
     // double-encode and produce a different mix shape than legacy.
     // lowestColorLevel widened from legacy's 500 → 1000 so the underwater fill
     // doesn't fully reach black within the visible WATER tile depths (max ≈ 759).
-    // This keeps a uniform depthColor wash across the open-water portion instead
-    // of a hard fade-to-black inside the tile.
+    // The old 500 was obviously too low under the OKLab scene blend (the fade hit
+    // black mid-tile). The sRGB-blend switch made it less obvious but introduced a
+    // weird magenta tint in the deep section because the per-channel mix toward
+    // vec3(0) crossed through unbalanced channel ratios. Widening the range keeps a
+    // uniform depthColor wash across the open-water portion instead of fading.
     float lowestColorLevel = 1000;
     float midColorLevel = 150;
     float surfaceLevel = IN.position.y - depth; // e.g. -1600

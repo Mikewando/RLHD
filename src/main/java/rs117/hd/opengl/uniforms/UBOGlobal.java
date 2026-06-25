@@ -24,16 +24,7 @@ public class UBOGlobal extends UniformBuffer<GLBuffer> {
 	public Property agxMaxEv = addProperty(PropertyType.Float, "agxMaxEv");
 	public Property agxPunchSaturation = addProperty(PropertyType.Float, "agxPunchSaturation");
 	public Property agxPunchPower = addProperty(PropertyType.Float, "agxPunchPower");
-	public Property agxSurfaceVibrance = addProperty(PropertyType.Float, "agxSurfaceVibrance");
-	public Property agxPointLightVibrance = addProperty(PropertyType.Float, "agxPointLightVibrance");
 	public Property agxLegacyMix = addProperty(PropertyType.Float, "agxLegacyMix");
-	public Property debugAttachedLightTint = addProperty(PropertyType.Int, "debugAttachedLightTint");
-	public Property debugProbeArm = addProperty(PropertyType.Int, "debugProbeArm");
-	public Property debugProbePixelScene = addProperty(PropertyType.IVec2, "debugProbePixelScene");
-	public Property debugProbePixelTonemap = addProperty(PropertyType.IVec2, "debugProbePixelTonemap");
-	public Property debugCursorMarker = addProperty(PropertyType.Int, "debugCursorMarker");
-	public Property debugCursorPixelTonemap = addProperty(PropertyType.IVec2, "debugCursorPixelTonemap");
-	public Property debugTagMask = addProperty(PropertyType.Int, "debugTagMask");
 	public Property saturation = addProperty(PropertyType.Float, "saturation");
 	public Property contrast = addProperty(PropertyType.Float, "contrast");
 	public Property colorFilterPrevious = addProperty(PropertyType.Int, "colorFilterPrevious");

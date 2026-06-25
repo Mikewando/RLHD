@@ -45,15 +45,6 @@ uniform sampler2DArray textureArray;
 uniform sampler2D shadowMap;
 uniform usampler2DArray tiledLightingArray;
 
-#if !LEGACY_RENDERER
-// Debug probe SSBO: one shared 16 vec4 buffer written from scene_frag (slots 0..3)
-// and tonemap_frag (slots 4..15). Java reads back after the frame.
-layout(std430, binding = 10) buffer DebugProbeBuffer {
-    vec4 debugProbeData[96];
-    uint sceneFragHits;
-};
-#endif
-
 // general HD settings
 
 flat in int fWorldViewId;
@@ -147,26 +138,28 @@ void main() {
     vec3 viewDir = normalize(cameraPos - IN.position);
 
     #if !LEGACY_RENDERER
-        // Default the tag-mask output so debug-mode early-returns don't leave the
-        // second color attachment undefined.
+        // Default the second colour attachment so non-terrain branches (water,
+        // early-return paths) don't leave it undefined.
         fragTag = vec4(0.0);
     #endif
 
-    // Probe-scope shadows of per-fragment values; populated inside the non-water
-    // terrain branch when available, else stay zero (water fragments).
-    float _probeHasAttachedLightBlend = 0.0;
-    float _probeUnlit = 0.0;
-    float _probeCompositeLightLen = 0.0;
-    vec3 _probeBaseColor = vec3(0.0);
-    int _probeColorMap1 = -2;
-    int _probeColorMap2 = -2;
-    // Function-scope so the fragTag write at the end of main() can read it after
-    // the terrain block closes. Populated inside #if !LEGACY_RENDERER terrain branch.
+    // Function-scope tag inputs so the fragTag write at the end of main() can read
+    // them after the terrain block closes. Populated inside the non-water terrain
+    // branch when available, else stay zero (water fragments contribute no tag).
+    //   hasAttachedLightBlend  — bit 7 (MATERIAL_FLAG_HAS_ATTACHED_LIGHT) blended
+    //                            across the three materials by IN.texBlend. Set by
+    //                            ModelOverride.legacyHighlightClip + lights.json
+    //                            auto-tag in SceneUploader/ModelStreamingManager.
+    //                            Used for both the per-tile (full-strength) and
+    //                            per-object (vibrance-scaled) paths, split by
+    //                            isTerrain at the tag-write site.
+    //   legacyHighlightBlend   — per-material bit 3 (MATERIAL_FLAG_IS_LEGACY_CLIP)
+    //                            blended the same way. Full-strength contribution
+    //                            (e.g. lava materials in materials.json).
+    //   pointLightTag          — smoothstep of point-light fraction of composite
+    //                            light luminance.
+    float hasAttachedLightBlend = 0.0;
     float legacyHighlightBlend = 0.0;
-    // Per-fragment point-light luminance scaled by agxPointLightVibrance and clamped
-    // to [0,1]. Drives the same R8 tag attachment as the object/material paths so a
-    // strong coloured glow pushes nearby surfaces toward the legacy hard-clip+sRGB
-    // hue. Stays zero for water fragments (computed only in the terrain branch).
     float pointLightTag = 0.0;
 
     Material material1 = getMaterial(fMaterialData[0] >> MATERIAL_INDEX_SHIFT & MATERIAL_INDEX_MASK);
@@ -398,22 +391,6 @@ void main() {
 
         outputColor = mix(underlayColor, overlayColor, overlayMix);
 
-        // Probe-scope shadows for per-fragment stack metadata.
-        _probeBaseColor = baseColor1.rgb * IN.texBlend.x + baseColor2.rgb * IN.texBlend.y + baseColor3.rgb * IN.texBlend.z;
-        _probeColorMap1 = colorMap1;
-        _probeColorMap2 = colorMap2;
-
-        #if !LEGACY_RENDERER
-            // ── debug probe: capture outputColor right after base/texture blend, before any lighting ──
-            if (debugProbeArm != 0 && ivec2(gl_FragCoord.xy) == debugProbePixelScene) {
-                debugProbeData[16] = vec4(outputColor.rgb, outputColor.a);
-                debugProbeData[17].x = float(overlayCount);
-                debugProbeData[17].y = float(underlayCount);
-                debugProbeData[17].z = float(colorMap1);
-                debugProbeData[17].w = float(colorMap2);
-            }
-        #endif
-
         // normals
         vec3 normals;
         if ((fMaterialData[0] >> MATERIAL_FLAG_UPWARDS_NORMALS & 1) == 1) {
@@ -561,25 +538,17 @@ void main() {
             getMaterialIsUnlit(material3)
         ));
 
-        // Surface vibrance / probe support: shadow lighting magnitude into function scope
-        _probeUnlit = unlit;
-        _probeCompositeLightLen = length(compositeLight);
-
         // Point-light-driven legacy tag. Metric is the fraction of total composite
         // light luminance contributed by point lights (diffuse + specular), passed
         // through a smoothstep so the transition between "sun-dominated" and
         // "point-light-dominated" is sharp instead of linear. Sample-derived cuts:
         // overworld with strong point light measures ratio ≈ 0.37 (want ~0), eclipse
         // moon attack ≈ 0.69 (want ~1). smoothstep(0.3, 0.7) hits both: 0.37 → 0.08,
-        // 0.69 → 1.00. Slider is a linear multiplier on the curve output.
-        vec3 luminanceWeights = vec3(0.2126, 0.7152, 0.0722);
-        float pointLightLum = dot(pointLightsOut + pointLightsSpecularOut, luminanceWeights);
-        float compositeLightLum = dot(compositeLight, luminanceWeights);
+        // 0.69 → 1.00.
+        float pointLightLum = dot(pointLightsOut + pointLightsSpecularOut, REC709_LUMA);
+        float compositeLightLum = dot(compositeLight, REC709_LUMA);
         float pointLightFraction = pointLightLum / max(compositeLightLum, 1e-5);
-        pointLightTag = clamp(
-            smoothstep(0.3, 0.7, pointLightFraction) * agxPointLightVibrance,
-            0.0, 1.0
-        );
+        pointLightTag = smoothstep(0.3, 0.7, pointLightFraction);
 
         #if VANILLA_COLOR_BANDING
             outputColor.rgb = linearToSrgb(outputColor.rgb);
@@ -591,15 +560,6 @@ void main() {
 
         // Apply lighting to the albedo: outputColor (LINEAR) × compositeLight
         // (LINEAR) = lit_albedo (LINEAR, may be HDR > 1 with dir × 4).
-        #if !LEGACY_RENDERER
-            // ── debug probe: capture outputColor right BEFORE the lighting multiply ──
-            if (debugProbeArm != 0 && ivec2(gl_FragCoord.xy) == debugProbePixelScene) {
-                debugProbeData[18] = vec4(outputColor.rgb, outputColor.a);
-                debugProbeData[19] = vec4(compositeLight, unlit);
-                debugProbeData[20] = vec4(tint.xyz, tint.w);
-            }
-        #endif
-
         if (tint.w > 0) {
             outputColor.rgb *= 1.0 + skyLightOut;
         } else {
@@ -607,18 +567,20 @@ void main() {
         }
 
         #if !LEGACY_RENDERER
-            // Per-fragment hasAttachedLightBlend drives the R8 tag attachment that
-            // tonemap_frag samples to apply AgX-time chroma compensation. The previous
-            // per-fragment inverse-AgX path was removed — see docs/agx-tag-mrt-plan.md
-            // for why that approach was structurally wrong (operating on a color that
-            // wasn't what AgX eventually saw, then diluted by alpha blend and OKLab
-            // encode before reaching the tonemap).
-            float hasAttachedLightBlend = dot(IN.texBlend, vec3(
+            // Texture-blend the MATERIAL_FLAG_HAS_ATTACHED_LIGHT bit across the three
+            // sampled materials. Bit 7's source is dual-purpose and split by isTerrain
+            // at the tag-write site:
+            //   - Objects (isTerrain=false): set by SceneUploader / ModelStreamingManager
+            //     when the object/NPC/projectile/graphics-object ID is in lights.json,
+            //     OR by ModelOverride.legacyHighlightClip. Gated by lightnessGate.
+            //   - Tiles (isTerrain=true): set by SceneUploader when the tile's
+            //     GroundMaterial has any member material flagged legacyHighlightClip
+            //     (e.g. karamja/eclipse-moon lava ground). Full-strength.
+            hasAttachedLightBlend = dot(IN.texBlend, vec3(
                 (fMaterialData[0] >> MATERIAL_FLAG_HAS_ATTACHED_LIGHT & 1),
                 (fMaterialData[1] >> MATERIAL_FLAG_HAS_ATTACHED_LIGHT & 1),
                 (fMaterialData[2] >> MATERIAL_FLAG_HAS_ATTACHED_LIGHT & 1)
             ));
-            _probeHasAttachedLightBlend = hasAttachedLightBlend;
             // Per-material legacy-clip signal: materials.json `legacyHighlightClip: true`
             // packs MaterialStruct.flags bit 3, blended through IN.texBlend the same way
             // unlit and hasAttachedLight are. Full-strength (1.0) contribution to fragTag.
@@ -627,26 +589,6 @@ void main() {
                 getMaterialIsLegacyClip(material2),
                 getMaterialIsLegacyClip(material3)
             ));
-            if (debugAttachedLightTint != 0 && hasAttachedLightBlend > 0.0) {
-                // Visual debug only: additive magenta wash over tagged fragments.
-                outputColor.rgb += vec3(5.0, 0.0, 5.0) * hasAttachedLightBlend;
-            }
-
-            // ── debug probe writes for scene_frag (slots 0..3) ──
-            if (debugProbeArm != 0 && ivec2(gl_FragCoord.xy) == debugProbePixelScene) {
-                debugProbeData[0] = vec4(outputColor.rgb, hasAttachedLightBlend);
-                debugProbeData[1] = vec4(
-                    intBitsToFloat(fMaterialData[0]),
-                    intBitsToFloat(fMaterialData[1]),
-                    intBitsToFloat(fMaterialData[2]),
-                    0.0
-                );
-                debugProbeData[2] = vec4(IN.texBlend, 0.0);
-                debugProbeData[3] = vec4(outputColor.rgb, hasAttachedLightBlend);
-                debugProbeData[15].x = float(int(gl_FragCoord.x));
-                debugProbeData[15].y = float(int(gl_FragCoord.y));
-                debugProbeData[15].z += 1.0; // shaderHits (scene)
-            }
 
             // Mirror legacy's RGBA8 clip-at-write behavior, but ONLY for tagged
             // fragments. Without this, a tagged HDR-bright fragment with more than
@@ -687,13 +629,6 @@ void main() {
             outputColor.a *= -256;
         }
     #endif
-
-    // Clamp before the GL alpha blend so per-channel saturation of HDR-bright
-    // values (notably water specular peaks) collapses to neutral white the way
-    // legacy's RGBA8 storage forces it to. Without this, channel ratios are
-    // preserved through the alpha multiplication and bright peaks display with
-    // their underlying tint (e.g. bluish sun glints on water).
-    //outputColor.rgb = clamp(outputColor.rgb, 0, 1);
 
     #if LEGACY_RENDERER
         outputColor.rgb = clamp(outputColor.rgb, 0, 1);
@@ -780,76 +715,47 @@ void main() {
     //          perceptually-uniform interpolation. tonemap_frag converts back.
     //   Legacy — sRGB-encoded. RGBA8 FBO; alpha blend in byte space; display
     //            interprets bytes as sRGB.
-    #if !LEGACY_RENDERER
-        // ── debug probe: capture every fragment that writes to this pixel ──
-        // Each entry is 2 vec4 starting at slot 24:
-        //   slot 24+2k:   outputColor.rgba — what GL blends as src into the OKLab FBO
-        //                 (rgb = OKLab encoded for zone, a = blend alpha).
-        //   slot 24+2k+1: (hasAttachedLightBlend, intBitsToFloat(fMaterialData[0]),
-        //                  unlit, length(compositeLight)).
-        // hasAttachedLightBlend/unlit/compositeLight are zero for water fragments.
-        if (debugProbeArm != 0 && ivec2(gl_FragCoord.xy) == debugProbePixelScene) {
-            uint idx = atomicAdd(sceneFragHits, 1u);
-            if (idx < 24u) {
-                uint base = 24u + 3u * idx;
-                debugProbeData[base] = outputColor;
-                debugProbeData[base + 1u] = vec4(
-                    _probeHasAttachedLightBlend,
-                    intBitsToFloat(fMaterialData[0]),
-                    _probeUnlit,
-                    _probeCompositeLightLen
-                );
-                debugProbeData[base + 2u] = vec4(
-                    _probeBaseColor,
-                    intBitsToFloat(_probeColorMap1)
-                );
-            }
-        }
-    #endif
-
     FragColor = outputColor;
     #if !LEGACY_RENDERER
         // Tag mask, written to a second R8 attachment that gets alpha-blended through
-        // the scene pass the same way FragColor is. Two things must be true for a
-        // fragment to push the per-pixel tag up:
-        //   (1) the fragment came from tagged geometry (hasAttachedLightBlend > 0); and
-        //   (2) the fragment actually contributes visible brightness (outputColor.r —
-        //       OKLab L at this point — is clamped to [0,1]; near-zero means the
-        //       fragment is essentially invisible, e.g. the GOTR barrier dummy whose
-        //       lit color is 0 and whose alpha is ~0.004).
-        // Without (2), an invisible-but-tagged near-transparent draw would still
-        // contribute its alpha-weighted fraction to the tag and compensate background
-        // pixels that the user never sees a tagged contribution at.
-        // (Declared vec4 for driver compatibility — single-float outputs to R8
-        // attachments were silently dropped on at least one Nvidia driver build.)
+        // the scene pass the same way FragColor is. Declared vec4 for driver
+        // compatibility — single-float outputs to R8 attachments were silently
+        // dropped on at least one Nvidia driver build.
         //
         // Bit 7 (MATERIAL_FLAG_HAS_ATTACHED_LIGHT) has context-sensitive semantics
         // based on isTerrain:
-        //   - On objects (isTerrain=false): bit 7 = "this object is tagged for
-        //     subtle glow compensation" (set by lights.json auto-tag or
-        //     ModelOverride.legacyHighlightClip). Goes through the vibrance×gate
-        //     path so the user's agxSurfaceVibrance slider tunes object glow and
-        //     so invisible-but-tagged transparent draws don't accumulate (e.g.
-        //     GOTR barrier dummy: lit colour 0, alpha ~0.004).
-        //   - On tiles (isTerrain=true): bit 7 = "this tile's groundMaterial is
-        //     explicitly tagged for legacy clip" (set by uploadTilePaint/Model
-        //     when groundMaterial.legacyHighlightClip is true). Promoted to the
+        //   - On objects (isTerrain=false): "this object is tagged for subtle glow
+        //     compensation" (set by lights.json auto-tag or
+        //     ModelOverride.legacyHighlightClip). Gated by lightnessGate so
+        //     invisible-but-tagged transparent draws don't accumulate.
+        //   - On tiles (isTerrain=true): "this tile's groundMaterial is explicitly
+        //     tagged for legacy clip" (set by uploadTilePaint/Model when
+        //     groundMaterial.legacyHighlightClip is true). Promoted to the
         //     full-strength legacyHighlightBlend path, matching how per-material
         //     bit 3 already works for tiles that happen to get a flagged Material
         //     assigned (e.g. karamja's vanilla-LAVA-texture path).
-        float tileFullStrength = isTerrain ? _probeHasAttachedLightBlend : 0.0;
-        float objectAttached = isTerrain ? 0.0 : _probeHasAttachedLightBlend;
-        // outputColor.r here is OKLab L (lightness); see the FBO-convention block above.
-        // Both the attached-light and point-light paths use it as a brightness gate so
-        // dim fragments don't get pushed toward the legacy hard-clip target, which is
-        // strictly darker than AgX below the per-channel clamp threshold.
+        //
+        // outputColor.r here is OKLab L (lightness); see the FBO-convention block
+        // above. Both the attached-light and point-light paths use it as a
+        // brightness gate so dim fragments don't get pushed toward the legacy
+        // hard-clip target, which is strictly darker than AgX below the per-channel
+        // clamp threshold (an invisible-but-tagged transparent draw would otherwise
+        // still contribute its alpha-weighted fraction).
+        float tileFullStrength = isTerrain ? hasAttachedLightBlend : 0.0;
+        float objectAttached = isTerrain ? 0.0 : hasAttachedLightBlend;
         float lightnessGate = clamp(outputColor.r, 0.0, 1.0);
-        float attached = objectAttached * agxSurfaceVibrance * lightnessGate;
+        float attached = objectAttached * lightnessGate;
         float pointGated = pointLightTag * lightnessGate;
         float tagContribution = max(
             attached,
             max(legacyHighlightBlend, max(tileFullStrength, pointGated))
         );
-        fragTag = vec4(tagContribution);
+        // src.a = outputColor.a so the scene-pass alpha blend weights the tag by
+        // how much of the pixel this fragment is actually contributing. Putting
+        // tagContribution in src.a (e.g. vec4(tagContribution) for both .r and .a)
+        // makes the blend tag² + dst×(1−tag), and an opaque untagged fragment
+        // (tag=0, outputColor.a=1) would leave the destination unchanged instead
+        // of clearing a previously-written tag at that pixel.
+        fragTag = vec4(tagContribution, 0.0, 0.0, outputColor.a);
     #endif
 }
