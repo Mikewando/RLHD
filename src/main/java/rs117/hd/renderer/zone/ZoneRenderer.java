@@ -619,41 +619,7 @@ public class ZoneRenderer implements Renderer {
 		plugin.uboGlobal.agxMaxEv.set((float) config.agxMaxEv());
 		plugin.uboGlobal.agxPunchSaturation.set(config.agxPunchSaturation() / 100f);
 		plugin.uboGlobal.agxPunchPower.set(config.agxPunchPower() / 100f);
-		plugin.uboGlobal.agxSurfaceVibrance.set(config.agxSurfaceVibrance() / 100f);
-		plugin.uboGlobal.agxPointLightVibrance.set(config.agxPointLightVibrance() / 100f);
 		plugin.uboGlobal.agxLegacyMix.set(environmentManager.currentLegacyHighlightMix);
-		plugin.uboGlobal.debugAttachedLightTint.set(config.debugAttachedLightTint() ? 1 : 0);
-		if (plugin.debugProbe != null)
-			plugin.debugProbe.beginFrame();
-		boolean probeArmed = plugin.debugProbe != null && plugin.debugProbe.isArmedThisFrame();
-		plugin.uboGlobal.debugProbeArm.set(probeArmed ? 1 : 0);
-		int[] sp = probeArmed ? plugin.debugProbe.sceneProbePixel() : new int[] { -1, -1 };
-		int[] tp = probeArmed ? plugin.debugProbe.tonemapProbePixel() : new int[] { -1, -1 };
-		plugin.uboGlobal.debugProbePixelScene.set(sp[0], sp[1]);
-		plugin.uboGlobal.debugProbePixelTonemap.set(tp[0], tp[1]);
-
-		// Live cursor marker — recomputes the cursor's claimed tonemap pixel every frame.
-		int cursorTmX = -1, cursorTmY = -1;
-		if (rs117.hd.utils.DebugProbe.showCursorMarker) {
-			net.runelite.api.Point c = client.getMouseCanvasPosition();
-			if (c != null && c.getX() >= 0 && c.getY() >= 0) {
-				int[] px = rs117.hd.utils.DebugProbe.mapCursorToProbePixels(
-					c.getX(), c.getY(),
-					client.getCanvasWidth(), client.getCanvasHeight(),
-					plugin.actualUiResolution, plugin.sceneViewport, plugin.sceneResolution,
-					false
-				);
-				if (px != null) {
-					cursorTmX = px[2];
-					cursorTmY = px[3];
-					rs117.hd.utils.DebugProbe.cursorTonemapPixel[0] = cursorTmX;
-					rs117.hd.utils.DebugProbe.cursorTonemapPixel[1] = cursorTmY;
-				}
-			}
-		}
-		plugin.uboGlobal.debugCursorMarker.set(rs117.hd.utils.DebugProbe.showCursorMarker ? 1 : 0);
-		plugin.uboGlobal.debugCursorPixelTonemap.set(cursorTmX, cursorTmY);
-		plugin.uboGlobal.debugTagMask.set(config.debugTagMask() ? 1 : 0);
 		float ambientStrength = environmentManager.currentAmbientStrength;
 		float directionalStrength = environmentManager.currentDirectionalStrength;
 		if (config.useLegacyBrightness()) {
@@ -1222,8 +1188,6 @@ public class ZoneRenderer implements Renderer {
 			}
 
 			frameTimer.begin(Timer.DRAW_SUBMIT);
-			if (plugin.debugProbe != null)
-				plugin.debugProbe.bindBeforeFrame();
 			if (shouldRenderScene) {
 				tiledLightingPass();
 				directionalShadowPass();
@@ -1260,12 +1224,6 @@ public class ZoneRenderer implements Renderer {
 
 				// Tonemap pass: sample fboSceneResolve, write to default FBO
 				plugin.runTonemapPass();
-				if (plugin.debugProbe != null) {
-					plugin.debugProbe.captureProbeCrop(
-						plugin.actualUiResolution[0], plugin.actualUiResolution[1],
-						plugin.awtContext.getBufferMode());
-					plugin.debugProbe.readbackAndLog();
-				}
 			} else {
 				glBindFramebuffer(GL_FRAMEBUFFER, plugin.awtContext.getFramebuffer(false));
 				glClearColor(0, 0, 0, 1);

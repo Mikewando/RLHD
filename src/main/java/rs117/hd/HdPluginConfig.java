@@ -362,14 +362,14 @@ public interface HdPluginConfig extends Config
 		keyName = KEY_TONEMAP_EXPOSURE,
 		name = "Tonemap exposure",
 		description =
-			"Pre-tonemap exposure multiplier for the new (zone) renderer.<br>" +
-			"100% means no exposure change; lower values darken, higher values brighten. " +
-			"The AgX tonemap rolls off highlights so very bright surfaces won't clip.",
+			"Pre-tonemap exposure multiplier for the zone renderer.<br>" +
+			"100% is no change; lower darkens, higher brightens.<br>" +
+			"AgX rolls off highlights, so very bright surfaces won't clip.",
 		position = 18,
 		section = generalSettings
 	)
 	default int tonemapExposure() {
-		return 20;
+		return 45;
 	}
 
 	String KEY_AGX_MIN_EV = "agxMinEv";
@@ -378,13 +378,13 @@ public interface HdPluginConfig extends Config
 		keyName = KEY_AGX_MIN_EV,
 		name = "AgX min EV",
 		description =
-			"Lower bound of the AgX log-space input range, in stops. " +
+			"Lower bound of the AgX log-space input range, in stops.<br>" +
 			"More negative extends shadow detail.",
 		position = 19,
 		section = generalSettings
 	)
 	default int agxMinEv() {
-		return -11;
+		return -10;
 	}
 
 	String KEY_AGX_MAX_EV = "agxMaxEv";
@@ -393,30 +393,30 @@ public interface HdPluginConfig extends Config
 		keyName = KEY_AGX_MAX_EV,
 		name = "AgX max EV",
 		description =
-			"Upper bound of the AgX log-space input range, in stops. " +
+			"Upper bound of the AgX log-space input range, in stops.<br>" +
 			"Higher dims mids/brights and adds highlight headroom.",
 		position = 20,
 		section = generalSettings
 	)
 	default int agxMaxEv() {
-		return 3;
+		return 4;
 	}
 
 	String KEY_AGX_PUNCH_SATURATION = "agxPunchSaturation";
-	@Range(min = 0, max = 200)
+	@Range(min = 1, max = 200)
 	@Units(Units.PERCENT)
 	@ConfigItem(
 		keyName = KEY_AGX_PUNCH_SATURATION,
 		name = "AgX punch saturation",
 		description =
-			"Luma-based saturation applied inside AgX after the sigmoid (linear " +
-			"color space). 100% is no-op. Distinct from the post-tonemap " +
-			"Saturation knob, which operates in sRGB/HSV.",
+			"Luma-based saturation applied inside AgX after the sigmoid, in linear space.<br>" +
+			"100% is no-op.<br>" +
+			"Distinct from the post-tonemap Saturation knob, which operates in sRGB/HSV.",
 		position = 21,
 		section = generalSettings
 	)
 	default int agxPunchSaturation() {
-		return 100;
+		return 105;
 	}
 
 	String KEY_AGX_PUNCH_POWER = "agxPunchPower";
@@ -426,90 +426,13 @@ public interface HdPluginConfig extends Config
 		keyName = KEY_AGX_PUNCH_POWER,
 		name = "AgX punch power",
 		description =
-			"Per-channel power curve applied inside AgX after the sigmoid " +
-			"(linear color space). 100% is no-op. Higher = punchier contrast.",
+			"Per-channel power curve applied inside AgX after the sigmoid, in linear space.<br>" +
+			"100% is no-op; higher = punchier contrast.",
 		position = 22,
 		section = generalSettings
 	)
 	default int agxPunchPower() {
-		return 100;
-	}
-
-	String KEY_AGX_SURFACE_VIBRANCE = "agxSurfaceVibrance";
-	@Range(min = 0, max = 1000)
-	@Units(Units.PERCENT)
-	@ConfigItem(
-		keyName = KEY_AGX_SURFACE_VIBRANCE,
-		name = "AgX surface vibrance",
-		description =
-			"Pre-compensates the surface colors of objects that have an " +
-			"attached light in lights.json (GOTR barrier, rewards guardian, " +
-			"POH portals, magical shield, etc.) so the object itself stays " +
-			"vivid through AgX rather than washing out toward white. " +
-			"0% is no-op; 100% fully cancels AgX's input-matrix desaturation. " +
-			"Values above 100% extrapolate past the inverse — try 200–500% " +
-			"on tagged surfaces to approach the saturated brightness of the " +
-			"legacy renderer for iconic emissive look.",
-		position = 24,
-		section = generalSettings
-	)
-	default int agxSurfaceVibrance() {
-		return 60;
-	}
-
-	String KEY_AGX_POINT_LIGHT_VIBRANCE = "agxPointLightVibrance";
-	@Range(min = 0, max = 1000)
-	@Units(Units.PERCENT)
-	@ConfigItem(
-		keyName = KEY_AGX_POINT_LIGHT_VIBRANCE,
-		name = "AgX point-light vibrance",
-		description =
-			"Pushes fragments dominated by coloured point lights toward the " +
-			"legacy hard-clip+sRGB hue (more saturated) instead of AgX's " +
-			"photographic chroma rolloff. Driven by the fraction of composite " +
-			"light luminance contributed by point lights, so daylit overworld " +
-			"with a strong point light still reads as overworld (sun dominates), " +
-			"while a colored glow in a dark arena tags strongly. 0% disables; " +
-			"100% = full legacy tag when point lights are 100% of the lighting.",
-		position = 25,
-		section = generalSettings
-	)
-	default int agxPointLightVibrance() {
-		return 100;
-	}
-
-	String KEY_DEBUG_ATTACHED_LIGHT_TINT = "debugAttachedLightTint";
-	@ConfigItem(
-		keyName = KEY_DEBUG_ATTACHED_LIGHT_TINT,
-		name = "Debug: tint attached-light fragments",
-		description =
-			"Temporary debug. When enabled, any fragment auto-tagged with " +
-			"MATERIAL_FLAG_HAS_ATTACHED_LIGHT (i.e. its object/NPC/projectile/" +
-			"graphics-object ID appears in lights.json) is rendered as bright " +
-			"magenta, modulated by the per-fragment blend amount. Used to " +
-			"confirm whether the AgX surface vibrance flag is reaching the " +
-			"surfaces it should.",
-		position = 25,
-		section = generalSettings
-	)
-	default boolean debugAttachedLightTint() {
-		return false;
-	}
-
-	String KEY_DEBUG_TAG_MASK = "debugTagMask";
-	@ConfigItem(
-		keyName = KEY_DEBUG_TAG_MASK,
-		name = "Debug: show tag mask",
-		description =
-			"Temporary debug. When enabled, the screen is replaced with the R8 " +
-			"tagged-glow mask produced by scene_frag's fragTag attachment (white = " +
-			"100% tagged, black = 0%). Used to verify the mask shape before " +
-			"trusting it for tonemap-time chroma compensation.",
-		position = 26,
-		section = generalSettings
-	)
-	default boolean debugTagMask() {
-		return false;
+		return 108;
 	}
 
 	/*====== Shadow settings ======*/
@@ -1117,7 +1040,9 @@ public interface HdPluginConfig extends Config
 	)
 	String legacySettings = "legacySettings";
 
-	String KEY_LEGACY_RENDERER_GAMMA = "legacyRendererGamma";
+	// Keeps the legacy "screenBrightness" storage key so existing users' saved value
+	// carries over after the rename from "Brightness" → "Legacy renderer gamma".
+	String KEY_LEGACY_RENDERER_GAMMA = "screenBrightness";
 	@Range(min = 25, max = 400)
 	@Units(Units.PERCENT)
 	@ConfigItem(

@@ -22,6 +22,11 @@ import static rs117.hd.utils.MathUtils.*;
 public class ColorUtils {
 	private static final float EPS = 1e-4f;
 
+	// BT.709 / sRGB luminance coefficients. Mirrors REC709_LUMA in color_utils.glsl.
+	public static final float REC709_LUMA_R = 0.2126f;
+	public static final float REC709_LUMA_G = 0.7152f;
+	public static final float REC709_LUMA_B = 0.0722f;
+
 	/**
 	 * Row-major transformation matrices for conversion between RGB and XYZ color spaces.
 	 * Fairman, H. S., Brill, M. H., & Hemmendinger, H. (1997).
@@ -256,10 +261,9 @@ public class ColorUtils {
 		float maxEv,
 		float exposure
 	) {
-		float lwR = 0.2126f, lwG = 0.7152f, lwB = 0.0722f;
-		float lumTarget = lwR * targetDisplayLinear[0]
-			+ lwG * targetDisplayLinear[1]
-			+ lwB * targetDisplayLinear[2];
+		float lumTarget = REC709_LUMA_R * targetDisplayLinear[0]
+			+ REC709_LUMA_G * targetDisplayLinear[1]
+			+ REC709_LUMA_B * targetDisplayLinear[2];
 		float invExp = 1f / Math.max(exposure, 1e-6f);
 		if (lumTarget < 1e-6f) {
 			// Target is essentially black; linear is also black regardless of scale.
@@ -292,9 +296,8 @@ public class ColorUtils {
 		}
 		float invPow = 1f / power;
 		float oneMinusSat = 1f - sat;
-		float lwR = 0.2126f, lwG = 0.7152f, lwB = 0.0722f;
 		float[] ldr = { out[0], out[1], out[2] };
-		float L = lwR * ldr[0] + lwG * ldr[1] + lwB * ldr[2];
+		float L = REC709_LUMA_R * ldr[0] + REC709_LUMA_G * ldr[1] + REC709_LUMA_B * ldr[2];
 		for (int iter = 0; iter < 8; iter++) {
 			float c = oneMinusSat * L;
 			for (int i = 0; i < 3; i++) {
@@ -302,7 +305,7 @@ public class ColorUtils {
 				if (t < 0) t = 0;
 				ldr[i] = (float) Math.pow(t, invPow);
 			}
-			L = lwR * ldr[0] + lwG * ldr[1] + lwB * ldr[2];
+			L = REC709_LUMA_R * ldr[0] + REC709_LUMA_G * ldr[1] + REC709_LUMA_B * ldr[2];
 		}
 		return ldr;
 	}

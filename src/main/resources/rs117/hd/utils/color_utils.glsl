@@ -29,6 +29,9 @@ const mat3 XYZ_TO_RGB_MATRIX = mat3(
     -.467937,  .0886025, 1.00911
 );
 
+// BT.709 / sRGB luminance coefficients. dot(linear_rgb, REC709_LUMA) → luminance.
+const vec3 REC709_LUMA = vec3(0.2126, 0.7152, 0.0722);
+
 /**
  * Transform from CIE 1931 XYZ color space to linear RGB.
  * @param XYZ coordinates
@@ -243,7 +246,7 @@ vec3 packedHslToSrgb(int hsl) {
 // amount == 1.0 is identity; amount > 1.0 increases saturation; amount < 1.0 desaturates toward grey.
 // Operates in any RGB space (linear or sRGB), but produces physically-correct results when used in linear.
 vec3 boostSaturation(vec3 color, float amount) {
-    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    float luma = dot(color, REC709_LUMA);
     return mix(vec3(luma), color, amount);
 }
 

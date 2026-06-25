@@ -44,13 +44,6 @@ public class UBOMaterials extends UniformBuffer<GLBuffer> {
 	public void update(Material[] materials, Texture[] vanillaTextures) {
 		this.materials = materials;
 
-		// Debug: log uboIndex → material name for cross-referencing fragment captures.
-		StringBuilder dump = new StringBuilder("[materials] uboIndex -> name (count=").append(materials.length).append("):");
-		for (int i = 0; i < materials.length; i++) {
-			dump.append("\n  [").append(i).append("] ").append(materials[i].name);
-		}
-		org.slf4j.LoggerFactory.getLogger(UBOMaterials.class).info(dump.toString());
-
 		for (int i = 0; i < materials.length; i++) {
 			var mat = materials[i];
 			mat.uboIndex = i;

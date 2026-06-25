@@ -117,7 +117,6 @@ import rs117.hd.scene.TextureManager;
 import rs117.hd.scene.TileOverrideManager;
 import rs117.hd.scene.WaterTypeManager;
 import rs117.hd.utils.ColorUtils;
-import rs117.hd.utils.DebugProbe;
 import rs117.hd.utils.DestructibleHandler;
 import rs117.hd.utils.DeveloperTools;
 import rs117.hd.utils.FileWatcher;
@@ -174,7 +173,6 @@ public class HdPlugin extends Plugin {
 	public static final int TEXTURE_UNIT_TILE_HEIGHT_MAP = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_TILED_LIGHTING_MAP = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_TONEMAP_SCENE = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
-	public static final int TEXTURE_UNIT_TONEMAP_DEPTH = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_TONEMAP_TAG = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 
 	public static int MAX_IMAGE_UNITS;
@@ -371,7 +369,7 @@ public class HdPlugin extends Plugin {
 	@Getter
 	@Nullable
 	private int[] uiResolution;
-	public final int[] actualUiResolution = { 0, 0 }; // Includes stretched mode and DPI scaling
+	private final int[] actualUiResolution = { 0, 0 }; // Includes stretched mode and DPI scaling
 	private final GLBuffer[] pboUi = new GLBuffer[3];
 	private int texUi;
 	private int uiWidth;
@@ -407,7 +405,6 @@ public class HdPlugin extends Plugin {
 	public int texTiledLighting;
 
 	public UBOGlobal uboGlobal;
-	public DebugProbe debugProbe;
 	public UBOUI uboUI;
 	public UBOLights uboLights;
 	public UBOLights uboLightsCulling;
@@ -1168,16 +1165,9 @@ public class HdPlugin extends Plugin {
 
 		uboLightsCulling = new UBOLights(true);
 		uboLightsCulling.initialize(UNIFORM_BLOCK_LIGHTS_CULLING);
-
-		debugProbe = new DebugProbe();
-		debugProbe.initialize();
 	}
 
 	private void destroyUbos() {
-		if (debugProbe != null)
-			debugProbe.destroy();
-		debugProbe = null;
-
 		if (uboGlobal != null)
 			uboGlobal.destroy();
 		uboGlobal = null;
@@ -1426,9 +1416,10 @@ public class HdPlugin extends Plugin {
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 				glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texSceneResolve, 0);
 
-				// Depth texture for sky bypass in tonemap pass (reverse depth: untouched pixels have depth == 0)
+				// Depth attachment for the resolve FBO so glBlitFramebuffer can copy
+				// depth out of the multisampled scene FBO. Not sampled by the tonemap
+				// shader; bound on TEXTURE_UNIT_TONEMAP_SCENE only for the upload here.
 				texSceneDepthResolve = glGenTextures();
-				glActiveTexture(TEXTURE_UNIT_TONEMAP_DEPTH);
 				glBindTexture(GL_TEXTURE_2D, texSceneDepthResolve);
 				glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, sceneResolution[0], sceneResolution[1], 0, GL_DEPTH_COMPONENT, GL_FLOAT, (ByteBuffer) null);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -1636,15 +1627,21 @@ public class HdPlugin extends Plugin {
 		pbo.unbind();
 	}
 
+	private boolean loggedTonemapMissing;
 	public void runTonemapPass() {
 		if (tonemapProgram == null || !tonemapProgram.isValid()) {
 			// Fallback: clear the scene area so drawUi() doesn't composite over a stale frame.
+			if (!loggedTonemapMissing) {
+				log.warn("Tonemap shader is not valid; scene will render as black until the shader compiles successfully");
+				loggedTonemapMissing = true;
+			}
 			glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
 			glViewport(sceneViewport[0], sceneViewport[1], sceneViewport[2], sceneViewport[3]);
 			glClearColor(0, 0, 0, 1);
 			glClear(GL_COLOR_BUFFER_BIT);
 			return;
 		}
+		loggedTonemapMissing = false;
 
 		glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
 		glViewport(
@@ -1660,9 +1657,6 @@ public class HdPlugin extends Plugin {
 		int filter = config.sceneScalingMode().glFilter;
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-
-		glActiveTexture(TEXTURE_UNIT_TONEMAP_DEPTH);
-		glBindTexture(GL_TEXTURE_2D, texSceneDepthResolve);
 
 		glActiveTexture(TEXTURE_UNIT_TONEMAP_TAG);
 		glBindTexture(GL_TEXTURE_2D, texSceneTagResolve);
