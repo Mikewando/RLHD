@@ -34,21 +34,28 @@
 
 #if !LEGACY_RENDERER
 
-// Stochastic texture detiling (Heitz/Deliot 2018 simplex/triangle-grid
-// variant, sans histogram preservation per Mikkelsen 2022 for normal maps).
-// Skew uv into an equilateral-triangle grid, hash each vertex into a random
-// offset, sample the texture at three offset uvs, blend by barycentrics.
-// textureGrad uses the original uv's derivatives so mip selection stays
-// stable across the three taps.
+// Integer-bitcast PCG-style hash on integer-valued cell coordinates.
+// Replaces the classic fract(sin(p) * 43758.5453) idiom which loses
+// uniformity on some modern GPU drivers (higher-precision sin) — exactly
+// the failure mode that would re-introduce visible patterning, which is
+// what this detiling is meant to remove.
 vec2 hash22(vec2 p) {
-    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-    return fract(sin(p) * 43758.5453);
+    uvec2 q = uvec2(ivec2(floor(p))) * uvec2(1597334673u, 3812015801u);
+    uint n = (q.x ^ q.y) * 1597334673u;
+    return vec2(uvec2(n, n * 48271u)) * (1.0 / float(0xffffffffu));
 }
 
-// anchorUv is used to determine which triangle cell we're in — must be
-// stable across animationFrame wraps (i.e. unscrolled world UV).
-// lookupUv is where we actually sample the texture — carries scroll + flow
-// distortion. With these separated, scroll wraps don't jump cell coords.
+// Stochastic texture detiling (Heitz/Deliot 2018 simplex/triangle-grid
+// variant, sans histogram preservation per Mikkelsen 2022 for normal maps).
+// Skew anchorUv into an equilateral-triangle grid, hash each vertex into
+// a random offset, sample at three offset uvs, blend by barycentrics.
+//
+// anchorUv determines the triangle cell — must be stable across
+// animationFrame wraps (i.e. unscrolled world UV).
+// lookupUv is the actual sample position — carries scroll + flow distortion.
+// With these separated, scroll wraps don't jump cell coords, so the hash
+// stays stable and the texture content sliding through fixed cells is
+// continuous via the texture's GL_REPEAT wrap.
 vec3 sampleNormalDetiled(int layer, vec2 anchorUv, vec2 lookupUv) {
     const mat2 gridToSkewed = mat2(1.0, 0.0, -0.57735, 1.15470);
     vec2 skewed = gridToSkewed * anchorUv * 3.4641016; // 2*sqrt(3)
