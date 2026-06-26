@@ -52,9 +52,10 @@ public final class VertexWriteCache {
 	public int putFace(
 		int alphaBiasHslA, int alphaBiasHslB, int alphaBiasHslC,
 		int materialDataA, int materialDataB, int materialDataC,
-		int terrainDataA, int terrainDataB, int terrainDataC
+		int terrainDataA, int terrainDataB, int terrainDataC,
+		int waterSurfaceColorA, int waterSurfaceColorB, int waterSurfaceColorC
 	) {
-		if (stagingPosition + 9 > stagingBuffer.length)
+		if (stagingPosition + 12 > stagingBuffer.length)
 			flushAndGrow();
 
 		final int textureFaceIdx = (outputBuffer.position() + stagingPosition) / 3;
@@ -73,7 +74,11 @@ public final class VertexWriteCache {
 		stagingBuffer[stagingPosition + 7] = terrainDataB;
 		stagingBuffer[stagingPosition + 8] = terrainDataC;
 
-		this.stagingPosition += 9;
+		stagingBuffer[stagingPosition + 9] = waterSurfaceColorA;
+		stagingBuffer[stagingPosition + 10] = waterSurfaceColorB;
+		stagingBuffer[stagingPosition + 11] = waterSurfaceColorC;
+
+		this.stagingPosition += 12;
 
 		return textureFaceIdx;
 	}

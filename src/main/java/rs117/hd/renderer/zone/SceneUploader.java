@@ -922,6 +922,8 @@ public class SceneUploader implements AutoCloseable {
 		int swTerrainData, seTerrainData, nwTerrainData, neTerrainData;
 		swTerrainData = seTerrainData = nwTerrainData = neTerrainData = HDUtils.packTerrainData(true, 0, waterType, tileZ);
 
+		int swWaterSurfaceColor = 0, seWaterSurfaceColor = 0, nwWaterSurfaceColor = 0, neWaterSurfaceColor = 0;
+
 		if (!onlyWaterSurface) {
 			swNormals = ctx.getVertexNormalOrDefault(swVertexKey, tileNormals[0], UP_NORMAL);
 			seNormals = ctx.getVertexNormalOrDefault(seVertexKey, tileNormals[1], UP_NORMAL);
@@ -1018,6 +1020,20 @@ public class SceneUploader implements AutoCloseable {
 
 			if (seColor == 0 && nwColor == 0 && (neColor == 0 || swColor == 0))
 				swColor = seColor = nwColor = neColor = 1 << 16; // Bias depth a bit if it's flush with underwater geometry
+
+			// Per-vertex OKLab-averaged surfaceColor; shader interpolates across the
+			// triangle so adjacent water types blend instead of forming a hard seam.
+			// Gated on configGroundBlending so the water blend follows the same
+			// toggle the user already uses for ground tile blending.
+			if (plugin.configGroundBlending) {
+				swWaterSurfaceColor = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(swVertexKey, 0);
+				seWaterSurfaceColor = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(seVertexKey, 0);
+				nwWaterSurfaceColor = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(nwVertexKey, 0);
+				neWaterSurfaceColor = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(neVertexKey, 0);
+			} else {
+				int packed = ColorUtils.packSrgb(waterType.getSurfaceColor());
+				swWaterSurfaceColor = seWaterSurfaceColor = nwWaterSurfaceColor = neWaterSurfaceColor = packed;
+			}
 		} else {
 			// Underwater geometry
 			swColor = seColor = neColor = nwColor = UNDERWATER_HSL;
@@ -1043,6 +1059,19 @@ public class SceneUploader implements AutoCloseable {
 			seTerrainData = HDUtils.packTerrainData(true, max(1, seDepth), waterType, tileZ);
 			nwTerrainData = HDUtils.packTerrainData(true, max(1, nwDepth), waterType, tileZ);
 			neTerrainData = HDUtils.packTerrainData(true, max(1, neDepth), waterType, tileZ);
+
+			// Same per-vertex surface color as the water surface pass so the
+			// underwater color blend smooths across fetid↔normal water seams
+			// instead of hard-switching at face boundaries.
+			if (plugin.configGroundBlending) {
+				swWaterSurfaceColor = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(swVertexKey, 0);
+				seWaterSurfaceColor = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(seVertexKey, 0);
+				nwWaterSurfaceColor = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(nwVertexKey, 0);
+				neWaterSurfaceColor = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(neVertexKey, 0);
+			} else {
+				int packed = ColorUtils.packSrgb(waterType.getSurfaceColor());
+				swWaterSurfaceColor = seWaterSurfaceColor = nwWaterSurfaceColor = neWaterSurfaceColor = packed;
+			}
 		}
 
 		swHeight -= override.heightOffset;
@@ -1086,7 +1115,8 @@ public class SceneUploader implements AutoCloseable {
 		int texturedFaceIdx = tb.putFace(
 			neColor, nwColor, seColor,
 			neMaterialData, nwMaterialData, seMaterialData,
-			neTerrainData, nwTerrainData, seTerrainData
+			neTerrainData, nwTerrainData, seTerrainData,
+			neWaterSurfaceColor, nwWaterSurfaceColor, seWaterSurfaceColor
 		);
 
 		vb.putStaticVertex(
@@ -1113,7 +1143,8 @@ public class SceneUploader implements AutoCloseable {
 		texturedFaceIdx = tb.putFace(
 			swColor, seColor, nwColor,
 			swMaterialData, seMaterialData, nwMaterialData,
-			swTerrainData, seTerrainData, nwTerrainData
+			swTerrainData, seTerrainData, nwTerrainData,
+			swWaterSurfaceColor, seWaterSurfaceColor, nwWaterSurfaceColor
 		);
 
 		vb.putStaticVertex(
@@ -1250,6 +1281,8 @@ public class SceneUploader implements AutoCloseable {
 			int terrainDataA, terrainDataB, terrainDataC;
 			terrainDataA = terrainDataB = terrainDataC = HDUtils.packTerrainData(true, 0, waterType, tileZ);
 
+			int waterSurfaceColorA = 0, waterSurfaceColorB = 0, waterSurfaceColorC = 0;
+
 			if (!onlyWaterSurface) {
 				normalsA = ctx.getVertexNormalOrDefault(vertexKeyA, tileNormals[0], UP_NORMAL);
 				normalsB = ctx.getVertexNormalOrDefault(vertexKeyB, tileNormals[1], UP_NORMAL);
@@ -1337,6 +1370,15 @@ public class SceneUploader implements AutoCloseable {
 					colorC = 0;
 				if (colorA == 0 && colorB == 0 && colorC == 0)
 					colorA = colorB = colorC = 1 << 16; // Bias depth a bit if it's flush with underwater geometry
+
+				if (plugin.configGroundBlending) {
+					waterSurfaceColorA = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(vertexKeyA, 0);
+					waterSurfaceColorB = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(vertexKeyB, 0);
+					waterSurfaceColorC = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(vertexKeyC, 0);
+				} else {
+					int packed = ColorUtils.packSrgb(waterType.getSurfaceColor());
+					waterSurfaceColorA = waterSurfaceColorB = waterSurfaceColorC = packed;
+				}
 			} else {
 				// Underwater geometry
 				colorA = colorB = colorC = UNDERWATER_HSL;
@@ -1370,6 +1412,18 @@ public class SceneUploader implements AutoCloseable {
 				terrainDataA = HDUtils.packTerrainData(true, max(1, depthA), waterType, tileZ);
 				terrainDataB = HDUtils.packTerrainData(true, max(1, depthB), waterType, tileZ);
 				terrainDataC = HDUtils.packTerrainData(true, max(1, depthC), waterType, tileZ);
+
+				// Same per-vertex surface color as the water surface pass so the
+				// underwater color blend smooths across fetid↔normal water seams
+				// instead of hard-switching at face boundaries.
+				if (plugin.configGroundBlending) {
+					waterSurfaceColorA = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(vertexKeyA, 0);
+					waterSurfaceColorB = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(vertexKeyB, 0);
+					waterSurfaceColorC = ctx.vertexWaterSurfaceColorSrgb.getOrDefault(vertexKeyC, 0);
+				} else {
+					int packed = ColorUtils.packSrgb(waterType.getSurfaceColor());
+					waterSurfaceColorA = waterSurfaceColorB = waterSurfaceColorC = packed;
+				}
 			}
 
 			if (ctx.isVertexOverlay(vertexKeyA) && ctx.isVertexUnderlay(vertexKeyA))
@@ -1421,7 +1475,8 @@ public class SceneUploader implements AutoCloseable {
 			int texturedFaceIdx = tb.putFace(
 				colorA, colorB, colorC,
 				materialDataA, materialDataB, materialDataC,
-				terrainDataA, terrainDataB, terrainDataC
+				terrainDataA, terrainDataB, terrainDataC,
+				waterSurfaceColorA, waterSurfaceColorB, waterSurfaceColorC
 			);
 
 			vb.putStaticVertex(
@@ -1797,6 +1852,7 @@ public class SceneUploader implements AutoCloseable {
 			final int texturedFaceIdx = tb.putFace(
 				color1, color2, color3,
 				materialData, materialData, materialData,
+				0, 0, 0,
 				0, 0, 0
 			);
 
@@ -2246,6 +2302,7 @@ public class SceneUploader implements AutoCloseable {
 			final int texturedFaceIdx = tb.putFace(
 				color1, color2, color3,
 				materialData, materialData, materialData,
+				0, 0, 0,
 				0, 0, 0
 			);
 
@@ -2461,7 +2518,8 @@ public class SceneUploader implements AutoCloseable {
 		int faceIdx = tb.putFace(
 			colorA, colorB, colorC,
 			packedMaterial, packedMaterial, packedMaterial,
-			terrainData, terrainData, terrainData
+			terrainData, terrainData, terrainData,
+			0, 0, 0
 		);
 		vb.putStaticVertex(x0, y0, z0, u0, v0, 0, 0, -1, 0, faceIdx);
 		vb.putStaticVertex(x1, y1, z1, u1, v1, 0, 0, -1, 0, faceIdx);

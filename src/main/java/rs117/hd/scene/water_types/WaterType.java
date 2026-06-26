@@ -39,6 +39,10 @@ public class WaterType {
 	// magnitude the artist tuned against, and the magnitude the lighting math expects.
 	@JsonAdapter(ColorUtils.SrgbAdapter.class)
 	private float[] surfaceColor = { 1, 1, 1 };
+
+	public float[] getSurfaceColor() {
+		return surfaceColor;
+	}
 	@JsonAdapter(ColorUtils.SrgbAdapter.class)
 	private float[] foamColor = srgb(176, 164, 146);
 	@JsonAdapter(ColorUtils.SrgbAdapter.class)

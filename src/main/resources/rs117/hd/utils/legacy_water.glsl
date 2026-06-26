@@ -33,7 +33,7 @@
 
 #if LEGACY_RENDERER
 
-vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
+vec4 sampleWater(int waterTypeIndex, vec3 viewDir, vec3 wSurfaceColor) {
     WaterType waterType = getWaterType(waterTypeIndex);
 
     vec2 uv1 = worldUvs(3).yx - animationFrame(28 * waterType.duration);
@@ -131,7 +131,7 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     vec3 compositeLight = ambientLightOut + lightOut + lightSpecularOut + skyLightOut + lightningOut +
     underglowOut + pointLightsOut + pointLightsSpecularOut + surfaceColorOut;
 
-    vec3 baseColor = waterType.surfaceColor * compositeLight;
+    vec3 baseColor = wSurfaceColor * compositeLight;
     baseColor = mix(baseColor, surfaceColor, waterType.fresnelAmount);
     if (waterType.fresnelAmount == 0.85)
         baseColor *= .75f; // Sailing hack
@@ -160,7 +160,9 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     return vec4(baseColor, alpha);
 }
 
-void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals) {
+void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals, vec3 wSurfaceColor) {
+    // wSurfaceColor unused — legacy keeps the depthColor-based multiply.
+    // Signature matches the zone variant so scene_frag can call uniformly.
     // underwater terrain
     float lowestColorLevel = 500;
     float midColorLevel = 150;

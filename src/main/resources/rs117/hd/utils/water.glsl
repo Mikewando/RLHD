@@ -34,7 +34,7 @@
 
 #if !LEGACY_RENDERER
 
-vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
+vec4 sampleWater(int waterTypeIndex, vec3 viewDir, vec3 wSurfaceColor) {
     WaterType waterType = getWaterType(waterTypeIndex);
 
     vec2 uv1 = worldUvs(3).yx - animationFrame(28 * waterType.duration);
@@ -133,7 +133,7 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     vec3 compositeLight = ambientLightOut + lightOut + lightSpecularOut + skyLightOut + lightningOut +
     underglowOut + pointLightsOut + pointLightsSpecularOut + surfaceColorOut;
 
-    vec3 baseColor = waterType.surfaceColor * compositeLight;
+    vec3 baseColor = wSurfaceColor * compositeLight;
     baseColor = mix(baseColor, surfaceColor, waterType.fresnelAmount);
     if (waterType.fresnelAmount == 0.85)
         baseColor *= .75f; // Sailing hack
@@ -162,13 +162,16 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     return vec4(baseColor, alpha);
 }
 
-void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals) {
+void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals, vec3 wSurfaceColor) {
     // outputColor enters sRGB-encoded (scene_frag wraps before calling) and must
     // leave the same way; the downstream fog mix expects sRGB-encoded input.
+    // wSurfaceColor is the per-vertex OKLab-averaged surfaceColor blended by
+    // texBlend in scene_frag — using it (rather than waterType.surfaceColor)
+    // smooths fetid↔normal water boundaries on the underwater side too.
     float surfaceLevel = IN.position.y - depth;
 
     vec3 groundOk = linearToOklab(srgbToLinear(outputColor));
-    vec3 waterOk = linearToOklab(waterType.surfaceColor);
+    vec3 waterOk = linearToOklab(wSurfaceColor);
 
     float depthScale = 500.0;
     float depthT = clamp(depth / depthScale, 0.0, 1.0);

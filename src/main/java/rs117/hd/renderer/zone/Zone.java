@@ -55,7 +55,8 @@ public class Zone implements Destructible {
 	// alphaBiasHsl ivec3
 	// materialData ivec3
 	// terrainData ivec3
-	public static final int TEXTURE_SIZE = 36;
+	// waterSurfaceColor ivec3
+	public static final int TEXTURE_SIZE = 48;
 
 	// Metadata format
 	// worldViewIndex int int
