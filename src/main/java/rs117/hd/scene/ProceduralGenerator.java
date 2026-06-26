@@ -865,9 +865,9 @@ public class ProceduralGenerator {
 
 	final class UnderwaterTerrainGenerator {
 		// Per-vertex OKLab accumulator for water surface colors. waterType.surfaceColor
-		// is consumed by the shader as linear-magnitude floats (no sRGB decode), so
-		// finalization packs bytes directly — no linearToSrgb encode — to keep the
-		// blended values in the same magnitude space the artist tuned against.
+		// is consumed by the shader as-is — no srgbToLinear decode. Finalization packs
+		// the averaged result back to bytes directly (no linearToSrgb encode either) so
+		// the blended values stay in the same byte-magnitude space the artist tuned.
 		private final class WaterSurfaceAccumulator {
 			float sumL, sumA, sumB;
 			int count;
