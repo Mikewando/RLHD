@@ -42,7 +42,59 @@
 
 #if WATER_PASS && !LEGACY_RENDERER
 
-vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
+// pcg2d, from Jarzynski & Olano 2020: https://jcgt.org/published/0009/03/02/
+vec2 pcg2d(vec2 p) {
+    uvec2 v = uvec2(ivec2(floor(p)));
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * 1664525u; v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    v.x += v.y * 1664525u; v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    return vec2(v) * (1.0 / float(0xffffffffu));
+}
+
+// Triangle-grid stochastic detiling, Heitz & Neyret 2018:
+// https://eheitzresearch.wordpress.com/722-2/
+//
+// anchorUv must be stable across animationFrame wraps (unscrolled world UV)
+// so scroll wraps don't jump cell coords; lookupUv carries scroll + flow.
+vec3 sampleNormalDetiled(int layer, vec2 anchorUv, vec2 lookupUv) {
+    const mat2 gridToSkewed = mat2(1.0, 0.0, -0.57735, 1.15470);
+    vec2 skewed = gridToSkewed * anchorUv * 3.4641016; // 2*sqrt(3)
+    vec2 base = floor(skewed);
+    vec2 f = skewed - base;
+    float fz = 1.0 - f.x - f.y;
+
+    vec2 v1, v2, v3;
+    vec3 w;
+    if (fz > 0.0) {
+        v1 = base;
+        v2 = base + vec2(0, 1);
+        v3 = base + vec2(1, 0);
+        w = vec3(fz, f.y, f.x);
+    } else {
+        v1 = base + vec2(1, 1);
+        v2 = base + vec2(1, 0);
+        v3 = base + vec2(0, 1);
+        w = vec3(-fz, 1.0 - f.y, 1.0 - f.x);
+    }
+
+    vec2 uv1 = lookupUv + pcg2d(v1);
+    vec2 uv2 = lookupUv + pcg2d(v2);
+    vec2 uv3 = lookupUv + pcg2d(v3);
+    vec2 dx = dFdx(lookupUv), dy = dFdy(lookupUv);
+
+    vec3 s1 = textureGrad(textureArray, vec3(uv1, layer), dx, dy).xyz;
+    vec3 s2 = textureGrad(textureArray, vec3(uv2, layer), dx, dy).xyz;
+    vec3 s3 = textureGrad(textureArray, vec3(uv3, layer), dx, dy).xyz;
+    vec3 blended = linearToSrgb(s1 * w.x + s2 * w.y + s3 * w.z);
+    // Heitz/Neyret variance rescale, skipping T/T⁻¹ since tangent-space
+    // normal maps sit near a known analytical mean.
+    const vec3 flatMean = vec3(0.5, 0.5, 1.0);
+    return flatMean + (blended - flatMean) / length(w);
+}
+
+vec4 sampleWater(int waterTypeIndex, vec3 viewDir, vec3 wSurfaceColor) {
     WaterType waterType = getWaterType(waterTypeIndex);
 
     vec2 anchorUv1 = worldUvs(3).yx;
@@ -62,13 +114,11 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     uv3 += uvFlow * flowMapStrength;
     uvFoam += uvFlow * flowMapStrength;
 
-    // get diffuse textures
-    vec3 n1 = linearToSrgb(texture(textureArray, vec3(uv1, waterType.normalMap)).xyz);
-    vec3 n2 = linearToSrgb(texture(textureArray, vec3(uv2, waterType.normalMap)).xyz);
-    vec3 n3 = linearToSrgb(texture(textureArray, vec3(uv3, waterType.normalMap)).xyz);
+    vec3 n1 = sampleNormalDetiled(waterType.normalMap, anchorUv1, uv1);
+    vec3 n2 = sampleNormalDetiled(waterType.normalMap, anchorUv2, uv2);
+    vec3 n3 = sampleNormalDetiled(waterType.normalMap, anchorUv3, uv3);
     float foamMask = texture(textureArray, vec3(uvFoam, MAT_WATER_FOAM.colorMap)).r;
 
-    // normals
     n1 = -vec3((n1.x * 2 - 1) * waterType.normalStrength, n1.z, (n1.y * 2 - 1) * waterType.normalStrength);
     n2 = -vec3((n2.x * 2 - 1) * waterType.normalStrength, n2.z, (n2.y * 2 - 1) * waterType.normalStrength);
     n3 = -vec3((n3.x * 2 - 1) * waterType.normalStrength, n3.z, (n3.y * 2 - 1) * waterType.normalStrength);
@@ -140,6 +190,7 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     // fresnel reflection
     float baseOpacity = 0.4;
     float fresnel = 1.0 - clamp(viewDotNormals, 0.0, 1.0);
+    fresnel = pow(fresnel, 1.75);
     float finalFresnel = clamp(mix(baseOpacity, 1.0, fresnel * 1.2), 0.0, 1.0);
     vec3 surfaceColor = vec3(0);
     vec3 celestialReflection = vec3(0);
@@ -217,7 +268,7 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     float shoreLineMask = 1 - dot(IN.texBlend, (fAlphaBiasHsl & 127) / 127.f);
     float foamAmount = min(shoreLineMask, 0.8);
     foamAmount = clamp(pow(1.0 - ((1.0 - foamAmount) / 0.7), 3), 0.0, 1.0) * waterType.hasFoam;
-    float opacityFresnel = max(finalFresnel, 1.0 - dot(viewDir, vec3(0, -1, 0)));
+    float opacityFresnel = max(finalFresnel, pow(1.0 - dot(viewDir, vec3(0, -1, 0)), 1.75));
 
     #if REDUCE_GLARE_INTENSITY
     // With glare reduction enabled, first evaluate the glare-free baseline, then the normal water.
@@ -241,14 +292,14 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
             ambientLightOut + lightOut + directionalSpecular + skyLightOut + lightningOut +
             underglowOut + pointLightsOut + pointLightsSpecularOut + surfaceColorOut;
 
-        vec3 baseColor = waterType.surfaceColor * compositeLight;
+        vec3 baseColor = wSurfaceColor * compositeLight;
 
         // Hacks to improve visibility between different sailing water types, based on unshadowed luminance
         bool isHazardous = waterType.fresnelAmount == 0.86;
         float fresnelAmount = isHazardous ? 0.85 : waterType.fresnelAmount;
         baseColor = mix(baseColor, surface, fresnelAmount);
         if (isHazardous) {
-            vec3 unshadowedBaseColor = waterType.surfaceColor *
+            vec3 unshadowedBaseColor = wSurfaceColor *
                 (ambientLightOut + unshadowedLightOut + skyLightOut + underglowOut);
             float waterLuminance = linearSrgbLuminance(srgbToLinear(max(unshadowedBaseColor, vec3(0))));
             float skyLuminance = linearSrgbLuminance(srgbToLinear(max(surface, vec3(0))));
@@ -312,28 +363,30 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
 
 #if !LEGACY_RENDERER
 
-void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals) {
-    // outputColor comes in already sRGB-encoded (scene_frag wraps it before calling
-    // us, matching legacy). Multiply directly in that space — wrapping again would
-    // double-encode and produce a different mix shape than legacy.
-    // lowestColorLevel widened from legacy's 500 → 1000 so the underwater fill
-    // doesn't fully reach black within the visible WATER tile depths (max ≈ 759).
-    // The old 500 was obviously too low under the OKLab scene blend (the fade hit
-    // black mid-tile). The sRGB-blend switch made it less obvious but introduced a
-    // weird magenta tint in the deep section because the per-channel mix toward
-    // vec3(0) crossed through unbalanced channel ratios. Widening the range keeps a
-    // uniform depthColor wash across the open-water portion instead of fading.
-    float lowestColorLevel = 1000;
-    float midColorLevel = 150;
-    float surfaceLevel = IN.position.y - depth; // e.g. -1600
+void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals, vec3 wSurfaceColor) {
+    // outputColor enters sRGB-encoded (scene_frag wraps before calling) and must
+    // leave the same way; the downstream fog mix expects sRGB-encoded input.
+    // wSurfaceColor is the per-vertex OKLab-averaged surfaceColor blended by
+    // texBlend in scene_frag — using it (rather than waterType.surfaceColor)
+    // smooths fetid↔normal water boundaries on the underwater side too.
+    float surfaceLevel = IN.position.y - depth;
 
-    if (depth < midColorLevel) {
-        outputColor *= mix(vec3(1), waterType.depthColor, translateRange(0, midColorLevel, depth));
-    } else if (depth < lowestColorLevel) {
-        outputColor *= mix(waterType.depthColor, vec3(0), translateRange(midColorLevel, lowestColorLevel, depth));
-    } else {
-        outputColor = vec3(0);
-    }
+    vec3 groundOk = linearToOklab(srgbToLinear(outputColor));
+    vec3 waterOk = linearToOklab(wSurfaceColor);
+
+    float depthScale = 500.0;
+    float depthT = clamp(depth / depthScale, 0.0, 1.0);
+    depthT = pow(depthT, 0.15);
+
+    float startLFactor = 0.5;
+    float endLFactor = 0.05;
+    waterOk.x *= mix(startLFactor, endLFactor, depthT);
+
+    vec3 resultOk = mix(groundOk, waterOk, depthT);
+
+    // Clamp to non-negative before linearToSrgb — OKLab→Linear can land
+    // out-of-gamut and pow(negative, fractional) NaNs.
+    outputColor = linearToSrgb(max(oklabToLinear(resultOk), vec3(0)));
 
     if (uboGlobal.underwaterCaustics) {
         const float scale = 1.75;

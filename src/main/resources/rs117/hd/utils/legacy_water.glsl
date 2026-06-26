@@ -41,7 +41,7 @@
 
 #if LEGACY_RENDERER
 
-vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
+vec4 sampleWater(int waterTypeIndex, vec3 viewDir, vec3 wSurfaceColor) {
     WaterType waterType = getWaterType(waterTypeIndex);
 
     vec2 anchorUv1 = worldUvs(3).yx;
@@ -307,7 +307,9 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     return water;
 }
 
-void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals) {
+void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals, vec3 wSurfaceColor) {
+    // wSurfaceColor unused — legacy keeps the depthColor-based multiply.
+    // Signature matches the zone variant so scene_frag can call uniformly.
     // underwater terrain
     float lowestColorLevel = 500;
     float midColorLevel = 150;
