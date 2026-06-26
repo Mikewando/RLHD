@@ -115,6 +115,7 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     // fresnel reflection
     float baseOpacity = 0.4;
     float fresnel = 1.0 - clamp(viewDotNormals, 0.0, 1.0);
+    fresnel = pow(fresnel, 1.75);
     float finalFresnel = clamp(mix(baseOpacity, 1.0, fresnel * 1.2), 0.0, 1.0);
     vec3 surfaceColor = vec3(0);
 
@@ -146,7 +147,7 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     foamAmount *= foamColor.r;
     baseColor = mix(baseColor, foamColor, foamAmount);
     vec3 specularComposite = mix(lightSpecularOut, vec3(0.0), foamAmount);
-    float flatFresnel = (1.0 - dot(viewDir, vec3(0, -1, 0))) * 1.0;
+    float flatFresnel = pow(1.0 - dot(viewDir, vec3(0, -1, 0)), 1.75);
     finalFresnel = max(finalFresnel, flatFresnel);
     finalFresnel -= finalFresnel * shadow * 0.2;
     baseColor += pointLightsSpecularOut + lightSpecularOut / 3;
