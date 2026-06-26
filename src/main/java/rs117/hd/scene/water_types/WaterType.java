@@ -33,10 +33,13 @@ public class WaterType {
 	private float fresnelAmount = 1;
 	@Nullable
 	private Material normalMap;
-	// JSON hex is artist-friendly notation, but these values are consumed as linear
-	// floats by both renderers (legacy historically did so; zone now does too post-cleanup).
-	// SrgbAdapter parses the hex into bytes-as-floats without an sRGB decode — that's the
-	// magnitude the artist tuned against, and the magnitude the lighting math expects.
+	// Consumed AS-IS by both renderers — no sRGB decode applied. SrgbAdapter
+	// normalizes the artist's hex bytes to floats in [0, 1]; the shader uses
+	// those values directly as the lateral magnitude it multiplies into lighting
+	// and feeds to OKLab. That bytes-as-floats convention is the magnitude the
+	// artist tuned against; calling srgbToLinear here would darken every water
+	// type uniformly. Despite the SrgbAdapter name (which just refers to the
+	// hex-byte source format), the data path is intentionally non-sRGB-decoded.
 	@JsonAdapter(ColorUtils.SrgbAdapter.class)
 	private float[] surfaceColor = { 1, 1, 1 };
 

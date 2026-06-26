@@ -81,10 +81,13 @@ public class SceneContext {
 	// Legacy renderer keeps using vertexTerrainColor (packed HSL).
 	public Int2IntHashMap vertexTerrainColorSrgbOverlay;
 	public Int2IntHashMap vertexTerrainColorSrgbUnderlay;
-	// Per-vertex OKLab-averaged water-surface colors, packed as 0x00RRGGBB
-	// byte-magnitudes (no sRGB encode) to match waterType.surfaceColor's
-	// "linear-floats" consumption convention. Drives blended water surface
-	// across adjacent water-type boundaries in the zone renderer.
+	// Per-vertex OKLab-averaged water surfaceColor values, packed as 0x00RRGGBB
+	// byte-magnitudes — NOT sRGB-encoded. The "Srgb" suffix matches the naming
+	// pattern of the sibling vertexTerrainColorSrgb* fields but the encoding is
+	// different: water surfaceColor is consumed by the shader as-is (no
+	// srgbToLinear), so packing through linearToSrgb would shift the magnitudes
+	// the artist tuned against. Drives blended water surface across adjacent
+	// water-type boundaries in the zone renderer.
 	public Int2IntHashMap vertexWaterSurfaceColorSrgb;
 	public Int2IntHashMap vertexTerrainData;
 	public Int2IntHashMap vertexTerrainNormalIndices;
