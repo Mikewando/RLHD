@@ -51,6 +51,9 @@ flat in int fWorldViewId;
 flat in ivec3 fAlphaBiasHsl;
 flat in ivec3 fMaterialData;
 flat in ivec3 fTerrainData;
+#if ZONE_RENDERER
+    flat in ivec3 fWaterSurfaceColor;
+#endif
 
 #if FLAT_SHADING && ZONE_RENDERER
     flat in vec3 fFlatNormal;
@@ -191,9 +194,23 @@ void main() {
 
     vec4 outputColor = vec4(1);
 
+    // Per-vertex OKLab-averaged surfaceColor packed as byte-magnitudes
+    // (no sRGB encode — matches waterType.surfaceColor's as-is consumption
+    // convention). Blend by texBlend to smooth adjacent water-type seams.
+    // Used by both sampleWater (surface) and sampleUnderwater (depth tint)
+    // so fetid↔normal water boundaries blend on both sides.
+    #if ZONE_RENDERER
+        vec3 wsc0 = vec3((fWaterSurfaceColor[0] >> 16) & 0xff, (fWaterSurfaceColor[0] >> 8) & 0xff, fWaterSurfaceColor[0] & 0xff) / 255.;
+        vec3 wsc1 = vec3((fWaterSurfaceColor[1] >> 16) & 0xff, (fWaterSurfaceColor[1] >> 8) & 0xff, fWaterSurfaceColor[1] & 0xff) / 255.;
+        vec3 wsc2 = vec3((fWaterSurfaceColor[2] >> 16) & 0xff, (fWaterSurfaceColor[2] >> 8) & 0xff, fWaterSurfaceColor[2] & 0xff) / 255.;
+        vec3 blendedSurfaceColor = wsc0 * IN.texBlend.x + wsc1 * IN.texBlend.y + wsc2 * IN.texBlend.z;
+    #else
+        vec3 blendedSurfaceColor = waterType.surfaceColor;
+    #endif
+
     if (isWater) {
         // sampleWater returns in unicorn-hybrid space. Don't try to convert.
-        outputColor = sampleWater(waterTypeIndex, viewDir);
+        outputColor = sampleWater(waterTypeIndex, viewDir, blendedSurfaceColor);
     } else {
         vec2 blendedUv = IN.uv;
 
@@ -636,9 +653,11 @@ void main() {
         outputColor.rgb = linearToSrgb(outputColor.rgb);
 
         if (isUnderwater) {
-            // Multiplies outputColor (sRGB-encoded) by mix(1, depthColor, t).
-            // depthColor is sRGB-encoded, so this is sRGB × sRGB.
-            sampleUnderwater(outputColor.rgb, waterType, waterDepth, lightDotNormals);
+            // OKLab-blends the lit terrain color (sRGB-encoded) toward the
+            // per-vertex water surfaceColor. Pass blendedSurfaceColor so the
+            // depth tint smooths across fetid↔normal water seams instead of
+            // hard-switching at face boundaries.
+            sampleUnderwater(outputColor.rgb, waterType, waterDepth, lightDotNormals, blendedSurfaceColor);
         }
     }
     // Beyond this point, outputColor.rgb is sRGB-encoded for terrain branches

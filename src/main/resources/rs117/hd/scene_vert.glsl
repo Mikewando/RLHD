@@ -54,6 +54,7 @@ layout (location = 0) in vec3 vPosition;
     flat out ivec3 fAlphaBiasHsl;
     flat out ivec3 fMaterialData;
     flat out ivec3 fTerrainData;
+    flat out ivec3 fWaterSurfaceColor;
 
     #if FLAT_SHADING
         flat out vec3 fFlatNormal;
@@ -81,6 +82,7 @@ layout (location = 0) in vec3 vPosition;
             // Only the Provoking vertex needs to fetch the face data
             fAlphaBiasHsl = texelFetch(textureFaces, faceIdx).xyz;
             fMaterialData = texelFetch(textureFaces, faceIdx + 1).xyz;
+            fWaterSurfaceColor = texelFetch(textureFaces, faceIdx + 3).xyz;
             fWorldViewId = vWorldViewId;
             alphaBiasHsl = fAlphaBiasHsl[vertex];
             materialData = fMaterialData[vertex];
@@ -88,6 +90,7 @@ layout (location = 0) in vec3 vPosition;
             // All outputs must be written to for macOS compatibility
             fAlphaBiasHsl = ivec3(0);
             fMaterialData = ivec3(0);
+            fWaterSurfaceColor = ivec3(0);
             fWorldViewId  = 0;
             alphaBiasHsl = texelFetch(textureFaces, faceIdx)[vertex];
             materialData = texelFetch(textureFaces, faceIdx + 1)[vertex];

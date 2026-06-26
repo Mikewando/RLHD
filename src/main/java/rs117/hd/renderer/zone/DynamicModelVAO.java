@@ -231,7 +231,7 @@ public class DynamicModelVAO implements Destructible {
 		if (view == null)
 			view = new View();
 		view.vbo = vboWriter.reserve(faceCount * 3 * VERT_SIZE_INTS);
-		view.tbo = tboWriter.reserve(faceCount * 9);
+		view.tbo = tboWriter.reserve(faceCount * 12);
 		view.vao = vao;
 		view.tboTexId = tbo.getTexId();
 		view.drawIdx = drawIdx;

@@ -864,6 +864,34 @@ public class ProceduralGenerator {
 	}
 
 	final class UnderwaterTerrainGenerator {
+		// Per-vertex OKLab accumulator for water surface colors. waterType.surfaceColor
+		// is consumed by the shader as linear-magnitude floats (no sRGB decode), so
+		// finalization packs bytes directly — no linearToSrgb encode — to keep the
+		// blended values in the same magnitude space the artist tuned against.
+		private final class WaterSurfaceAccumulator {
+			float sumL, sumA, sumB;
+			int count;
+
+			void add(float L, float a, float b) {
+				sumL += L;
+				sumA += a;
+				sumB += b;
+				count++;
+			}
+
+			int finalizeToPackedBytes() {
+				float invN = 1f / count;
+				float[] oklab = { sumL * invN, sumA * invN, sumB * invN };
+				float[] linear = ColorUtils.oklabToLinear(oklab);
+				int r = clamp(round(linear[0] * 255f), 0, 255);
+				int g = clamp(round(linear[1] * 255f), 0, 255);
+				int b = clamp(round(linear[2] * 255f), 0, 255);
+				return r << 16 | g << 8 | b;
+			}
+		}
+
+		private Int2ObjectHashMap<WaterSurfaceAccumulator> oklabAccumulatorsWaterSurface;
+
 		private final int[][] vertices = new int[4][3];
 		private final int[] hashes = new int[4];
 
@@ -891,6 +919,10 @@ public class ProceduralGenerator {
 			sceneContext.vertexTerrainData = new Int2IntHashMap(
 				prevSceneCtx != null && prevSceneCtx.vertexTerrainData != null ?
 					prevSceneCtx.vertexTerrainData.capacity() : 0);
+			sceneContext.vertexWaterSurfaceColorSrgb = new Int2IntHashMap(
+				prevSceneCtx != null && prevSceneCtx.vertexWaterSurfaceColorSrgb != null ?
+					prevSceneCtx.vertexWaterSurfaceColorSrgb.capacity() : 0);
+			oklabAccumulatorsWaterSurface = new Int2ObjectHashMap<>(sceneContext.vertexWaterSurfaceColorSrgb.capacity());
 			// the world-space height offsets of each vertex on the tile grid
 			// these offsets are interpolated to calculate offsets for vertices not on the grid (tile models)
 
@@ -936,7 +968,8 @@ public class ProceduralGenerator {
 							tileVertexKeys(sceneContext, tile, vertices, hashes);
 
 							var override = sceneContext.getTileOverride(tileZ, x, y, TILE_OVERRIDE_MAIN);
-							if (seasonalWaterType(override, tilePaint.getTexture()) == WaterType.NONE) {
+							var paintWaterType = seasonalWaterType(override, tilePaint.getTexture());
+							if (paintWaterType == WaterType.NONE) {
 								for (int i = 0; i < hashes.length; i++)
 									if (tilePaint.getNeColor() != HIDDEN_HSL || override.forced)
 										sceneContext.setVertexIsLand(hashes[i]);
@@ -978,8 +1011,10 @@ public class ProceduralGenerator {
 								minY[z] = min(minY[z], y);
 								maxY[z] = max(maxY[z], y);
 
-								for (int i = 0; i < hashes.length; i++)
+								for (int i = 0; i < hashes.length; i++) {
 									sceneContext.setVertexIsWater(hashes[i]);
+									accumulateWaterSurfaceColor(hashes[i], paintWaterType);
+								}
 							}
 						} else if (tileModel != null) {
 							int faceCount = tileModel.getFaceX().length;
@@ -1030,7 +1065,8 @@ public class ProceduralGenerator {
 								var override = ProceduralGenerator.isOverlayFace(tile, face) ? overlayOverride : underlayOverride;
 								int textureId = tileModel.getTriangleTextureId() == null ? -1 :
 									tileModel.getTriangleTextureId()[face];
-								if (seasonalWaterType(override, textureId) == WaterType.NONE) {
+								var faceWaterType = seasonalWaterType(override, textureId);
+								if (faceWaterType == WaterType.NONE) {
 									for (int vertex = 0; vertex < VERTICES_PER_FACE; vertex++) {
 										if (tileModel.getTriangleColorA()[face] != HIDDEN_HSL || override.forced)
 											sceneContext.setVertexIsLand(hashes[vertex]);
@@ -1051,8 +1087,10 @@ public class ProceduralGenerator {
 									minY[z] = min(minY[z], y);
 									maxY[z] = max(maxY[z], y);
 
-									for (int vertex = 0; vertex < VERTICES_PER_FACE; vertex++)
+									for (int vertex = 0; vertex < VERTICES_PER_FACE; vertex++) {
 										sceneContext.setVertexIsWater(hashes[vertex]);
+										accumulateWaterSurfaceColor(hashes[vertex], faceWaterType);
+									}
 								}
 							}
 						} else {
@@ -1179,6 +1217,21 @@ public class ProceduralGenerator {
 					for (int x = 0; x < sizeX; ++x)
 						System.arraycopy(this.underwaterDepthLevels[z][x], 0, sceneUnderwaterDepthLevels[z][x], 0, sizeY);
 			}
+
+			for (var entry : oklabAccumulatorsWaterSurface)
+				sceneContext.vertexWaterSurfaceColorSrgb.put(entry.getKey(), entry.getValue().finalizeToPackedBytes());
+			oklabAccumulatorsWaterSurface = null;
+		}
+
+		private void accumulateWaterSurfaceColor(int vertexKey, WaterType waterType) {
+			float[] surfaceColor = waterType.getSurfaceColor();
+			float[] oklab = ColorUtils.linearToOklab(surfaceColor);
+			var acc = oklabAccumulatorsWaterSurface.get(vertexKey);
+			if (acc == null) {
+				acc = new WaterSurfaceAccumulator();
+				oklabAccumulatorsWaterSurface.put(vertexKey, acc);
+			}
+			acc.add(oklab[0], oklab[1], oklab[2]);
 		}
 
 		private int getHeightOffset(int z, int x, int y) {
