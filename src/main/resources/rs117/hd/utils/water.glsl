@@ -163,27 +163,26 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
 }
 
 void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals) {
-    // outputColor comes in already sRGB-encoded (scene_frag wraps it before calling
-    // us, matching legacy). Multiply directly in that space — wrapping again would
-    // double-encode and produce a different mix shape than legacy.
-    // lowestColorLevel widened from legacy's 500 → 1000 so the underwater fill
-    // doesn't fully reach black within the visible WATER tile depths (max ≈ 759).
-    // The old 500 was obviously too low under the OKLab scene blend (the fade hit
-    // black mid-tile). The sRGB-blend switch made it less obvious but introduced a
-    // weird magenta tint in the deep section because the per-channel mix toward
-    // vec3(0) crossed through unbalanced channel ratios. Widening the range keeps a
-    // uniform depthColor wash across the open-water portion instead of fading.
-    float lowestColorLevel = 1000;
-    float midColorLevel = 150;
-    float surfaceLevel = IN.position.y - depth; // e.g. -1600
+    // outputColor enters sRGB-encoded (scene_frag wraps before calling) and must
+    // leave the same way; the downstream fog mix expects sRGB-encoded input.
+    float surfaceLevel = IN.position.y - depth;
 
-    if (depth < midColorLevel) {
-        outputColor *= mix(vec3(1), waterType.depthColor, translateRange(0, midColorLevel, depth));
-    } else if (depth < lowestColorLevel) {
-        outputColor *= mix(waterType.depthColor, vec3(0), translateRange(midColorLevel, lowestColorLevel, depth));
-    } else {
-        outputColor = vec3(0);
-    }
+    vec3 groundOk = linearToOklab(srgbToLinear(outputColor));
+    vec3 waterOk = linearToOklab(waterType.surfaceColor);
+
+    float depthScale = 500.0;
+    float depthT = clamp(depth / depthScale, 0.0, 1.0);
+    depthT = pow(depthT, 0.15);
+
+    float startLFactor = 0.5;
+    float endLFactor = 0.05;
+    waterOk.x *= mix(startLFactor, endLFactor, depthT);
+
+    vec3 resultOk = mix(groundOk, waterOk, depthT);
+
+    // Clamp to non-negative before linearToSrgb — OKLab→Linear can land
+    // out-of-gamut and pow(negative, fractional) NaNs.
+    outputColor = linearToSrgb(max(oklabToLinear(resultOk), vec3(0)));
 
     if (underwaterCaustics) {
         const float scale = 1.75;
