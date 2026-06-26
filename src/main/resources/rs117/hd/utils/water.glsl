@@ -34,12 +34,59 @@
 
 #if !LEGACY_RENDERER
 
+// Stochastic texture detiling (Heitz/Deliot 2018 simplex/triangle-grid
+// variant, sans histogram preservation per Mikkelsen 2022 for normal maps).
+// Skew uv into an equilateral-triangle grid, hash each vertex into a random
+// offset, sample the texture at three offset uvs, blend by barycentrics.
+// textureGrad uses the original uv's derivatives so mip selection stays
+// stable across the three taps.
+vec2 hash22(vec2 p) {
+    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+    return fract(sin(p) * 43758.5453);
+}
+
+// anchorUv is used to determine which triangle cell we're in — must be
+// stable across animationFrame wraps (i.e. unscrolled world UV).
+// lookupUv is where we actually sample the texture — carries scroll + flow
+// distortion. With these separated, scroll wraps don't jump cell coords.
+vec3 sampleNormalDetiled(int layer, vec2 anchorUv, vec2 lookupUv) {
+    const mat2 gridToSkewed = mat2(1.0, 0.0, -0.57735, 1.15470);
+    vec2 skewed = gridToSkewed * anchorUv * 3.4641016; // 2*sqrt(3)
+    vec2 base = floor(skewed);
+    vec2 f = skewed - base;
+    float fz = 1.0 - f.x - f.y;
+
+    vec2 v1, v2, v3;
+    vec3 w;
+    if (fz > 0.0) {
+        v1 = base;
+        v2 = base + vec2(0, 1);
+        v3 = base + vec2(1, 0);
+        w = vec3(fz, f.y, f.x);
+    } else {
+        v1 = base + vec2(1, 1);
+        v2 = base + vec2(1, 0);
+        v3 = base + vec2(0, 1);
+        w = vec3(-fz, 1.0 - f.y, 1.0 - f.x);
+    }
+
+    vec2 uv1 = lookupUv + hash22(v1);
+    vec2 uv2 = lookupUv + hash22(v2);
+    vec2 uv3 = lookupUv + hash22(v3);
+    vec2 dx = dFdx(lookupUv), dy = dFdy(lookupUv);
+
+    vec3 s1 = linearToSrgb(textureGrad(textureArray, vec3(uv1, layer), dx, dy).xyz);
+    vec3 s2 = linearToSrgb(textureGrad(textureArray, vec3(uv2, layer), dx, dy).xyz);
+    vec3 s3 = linearToSrgb(textureGrad(textureArray, vec3(uv3, layer), dx, dy).xyz);
+    return s1 * w.x + s2 * w.y + s3 * w.z;
+}
+
 vec4 sampleWater(int waterTypeIndex, vec3 viewDir, vec3 wSurfaceColor) {
     WaterType waterType = getWaterType(waterTypeIndex);
 
     vec2 uv1 = worldUvs(3).yx - animationFrame(28 * waterType.duration);
-    vec2 uv2 = worldUvs(3) + animationFrame(24 * waterType.duration);
-    vec2 uv3 = IN.uv;
+    vec2 uv2 = worldUvs(3)    + animationFrame(24 * waterType.duration);
+    vec2 uvFoam = IN.uv;
 
     vec2 flowMapUv = worldUvs(15) + animationFrame(50 * waterType.duration);
     float flowMapStrength = 0.025;
@@ -47,14 +94,12 @@ vec4 sampleWater(int waterTypeIndex, vec3 viewDir, vec3 wSurfaceColor) {
     vec2 uvFlow = texture(textureArray, vec3(flowMapUv, MAT_WATER_FLOW_MAP.colorMap)).xy;
     uv1 += uvFlow * flowMapStrength;
     uv2 += uvFlow * flowMapStrength;
-    uv3 += uvFlow * flowMapStrength;
+    uvFoam += uvFlow * flowMapStrength;
 
-    // get diffuse textures
-    vec3 n1 = linearToSrgb(texture(textureArray, vec3(uv1, waterType.normalMap)).xyz);
-    vec3 n2 = linearToSrgb(texture(textureArray, vec3(uv2, waterType.normalMap)).xyz);
-    float foamMask = texture(textureArray, vec3(uv3, MAT_WATER_FOAM.colorMap)).r;
+    vec3 n1 = sampleNormalDetiled(waterType.normalMap, worldUvs(3).yx, uv1);
+    vec3 n2 = sampleNormalDetiled(waterType.normalMap, worldUvs(3), uv2);
+    float foamMask = texture(textureArray, vec3(uvFoam, MAT_WATER_FOAM.colorMap)).r;
 
-    // normals
     n1 = -vec3((n1.x * 2 - 1) * waterType.normalStrength, n1.z, (n1.y * 2 - 1) * waterType.normalStrength);
     n2 = -vec3((n2.x * 2 - 1) * waterType.normalStrength, n2.z, (n2.y * 2 - 1) * waterType.normalStrength);
     vec3 normals = normalize(n1 + n2);
