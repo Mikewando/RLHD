@@ -392,20 +392,34 @@ public class SceneUploader implements AutoCloseable {
 		int tileZ = t.getRenderLevel();
 
 		SceneTilePaint paint = t.getSceneTilePaint();
-		if (paint != null && paint.getNeColor() != HIDDEN_HSL) {
-			z.sizeO += 2;
-			z.sizeF += 2;
-
+		if (paint != null) {
+			boolean isHidden = paint.getNeColor() == HIDDEN_HSL;
 			TileOverride override = ctx.getTileOverride(tileZ, tileExX, tileExY, TILE_OVERRIDE_MAIN);
 			WaterType waterType = proceduralGenerator.seasonalWaterType(override, paint.getTexture());
-			if (waterType != WaterType.NONE) {
-				z.hasWater = true;
-				// Since these are surface tiles, they should perhaps technically be in the alpha buffer,
-				// but we'll render them in the correct order without needing face sorting,
-				// so we might as well use the opaque buffer for simplicity
+			boolean isWater = waterType != WaterType.NONE;
+			// Mirror the upload-side gating exactly so the per-zone face
+			// budget matches what we'll actually write. Pass-1 (terrain /
+			// underwater) runs whenever the tile isn't hidden, or the
+			// override opted into rendering only the underwater pass via
+			// skipWaterSurface (e.g. pest control landers). Pass-2 (water
+			// surface) runs for non-hidden water tiles that don't opt out
+			// of their surface.
+			if (!isHidden || override.skipWaterSurface) {
 				z.sizeO += 2;
 				z.sizeF += 2;
-			} else {
+			}
+			if (isWater) {
+				z.hasWater = true;
+				if (!isHidden && !override.skipWaterSurface) {
+					// Water surface pass — skipped for hidden tiles since the
+					// object on top occupies that visual space.
+					// Surface tiles could technically go in the alpha buffer,
+					// but we render them in the correct order without face
+					// sorting so we reuse the opaque buffer for simplicity.
+					z.sizeO += 2;
+					z.sizeF += 2;
+				}
+			} else if (!isHidden) {
 				z.onlyWater = false;
 			}
 		}
@@ -864,12 +878,22 @@ public class SceneUploader implements AutoCloseable {
 		int neColor = paint.getNeColor();
 		int nwColor = paint.getNwColor();
 
-		if (neColor == HIDDEN_HSL)
-			return;
-
 		TileOverride override = ctx.getTileOverride(tileZ, tileExX, tileExY, TILE_OVERRIDE_MAIN);
 		WaterType waterType = proceduralGenerator.seasonalWaterType(override, paint.getTexture());
 		if (onlyWaterSurface && waterType == WaterType.NONE)
+			return;
+		// Tiles flagged to skip their water surface render — the object on
+		// top occupies that visual space (e.g. pest control landers). The
+		// underwater pass still runs when invoked separately with
+		// onlyWaterSurface=false so the seabed shows around the obstruction.
+		if (onlyWaterSurface && override.skipWaterSurface)
+			return;
+		// HIDDEN_HSL marks tiles vanilla doesn't draw. Skip unless the
+		// override opted into rendering the underwater pass via
+		// skipWaterSurface. Vanilla paints elevated "ground above water"
+		// tiles (piers, gangplanks) as HIDDEN water-textured tiles too;
+		// without opt-in we don't want to draw a seabed at pier elevation.
+		if (neColor == HIDDEN_HSL && !override.skipWaterSurface)
 			return;
 
 		ctx.filledTiles[tileExX][tileExY] |= (byte) (1 << tileZ);

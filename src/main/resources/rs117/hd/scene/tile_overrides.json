@@ -6081,7 +6081,8 @@
       161
     ],
     "waterType": "WATER",
-    "blended": false
+    "blended": false,
+    "skipWaterSurface": true
   },
   {
     "name": "PEST_CONTROL_LANDER_WATER_FIX_2",
@@ -6090,7 +6091,8 @@
       42
     ],
     "waterType": "WATER",
-    "blended": false
+    "blended": false,
+    "skipWaterSurface": true
   },
   {
     "name": "VOID_OUTPOST_BEACH",

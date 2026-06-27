@@ -48,6 +48,7 @@ public class TileOverride {
 	public boolean blended = true;
 	public boolean blendedAsOpposite;
 	public boolean forced;
+	public boolean skipWaterSurface;
 	public boolean depthTested;
 	private int setHue = -1;
 	private int shiftHue;
