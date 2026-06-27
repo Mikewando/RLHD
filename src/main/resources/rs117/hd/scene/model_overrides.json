@@ -19903,6 +19903,26 @@
   {
     "description": "Wilderness - Lava Pool Edges - Darker",
     "baseMaterial": "NONE",
+    "legacyHighlightClip": true,
+    "objectIds": [
+      "WILD_FALLOFF_10",
+      "WILD_FALLOFF_12",
+      "WILD_FALLOFF_11",
+      "WILD_FALLOFF3",
+      "WILD_FALLOFF5",
+      "WILD_FALLOFF1",
+      "WILD_FALLOFF9",
+      "WILD_FALLOFF4",
+      "WILD_FALLOFF8",
+      "WILD_FALLOFF2",
+      "WILD_FALLOFF7",
+      "WILD_FALLOFF6"
+    ]
+  },
+  {
+    "description": "Wilderness - Lava Pool Edges - Darker",
+    "baseMaterial": "NONE",
+    "legacyHighlightClip": true,
     "areas": [ "WILDERNESS" ],
     "objectIds": [
       "WILD_FALLOFF_10",
@@ -19931,6 +19951,7 @@
   {
     "description": "Wilderness - Lava Pool Edges - Lighter",
     "baseMaterial": "NONE",
+    "legacyHighlightClip": true,
     "areas": [ "Wilderness - Lava Pool Edges - Lighter" ],
     "objectIds": [
       "WILD_FALLOFF_10",
