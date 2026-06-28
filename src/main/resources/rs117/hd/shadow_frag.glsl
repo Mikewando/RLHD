@@ -40,6 +40,8 @@
     in float fOpacity;
 #endif
 
+layout(location = 0) out uint shadowDepthUintOut;
+
 void main() {
     float opacity = 1;
     #if SHADOW_TRANSPARENCY
@@ -78,5 +80,17 @@ void main() {
             int((1 - opacity) * SHADOW_ALPHA_MAX) << SHADOW_DEPTH_BITS |
             int(depth * SHADOW_DEPTH_MAX)
         ) / float(SHADOW_COMBINED_MAX);
+
+        // Lossless write into the R32UI color attachment: 24-bit depth in
+        // the lower bits, 8-bit (1-opacity) in the upper bits. Receivers read
+        // this instead of decoding the (now-only-for-sort) depth attachment.
+        uint depth24 = uint(gl_FragCoord.z * 16777215.0);
+        uint alpha8  = uint((1.0 - opacity) * 255.0);
+        shadowDepthUintOut = (alpha8 << 24) | (depth24 & 0x00FFFFFFu);
+    #else
+        // Full 32-bit depth scaled to 0..(2^32 - 256). The trailing 8 bits
+        // we leave clear avoid an overflow at depth = 1.0 (multiplying by
+        // 2^32 - 1 would round to 2^32 in float32 and wrap to 0).
+        shadowDepthUintOut = uint(gl_FragCoord.z * 4294967040.0);
     #endif
 }
