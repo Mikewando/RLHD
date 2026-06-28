@@ -45,19 +45,19 @@
 #endif
 
 #if SHADOW_MODE != SHADOW_MODE_OFF
-float fetchShadowTexel(ivec2 pixelCoord, float fragDepth, vec3 fragPos, int i) {
-    #if SHADOW_FILTERING == SHADOW_FILTERING_DITHER
-        int index = int(hash(vec4(floor(fragPos.xyz), i)) * POISSON_DISK_LENGTH) % POISSON_DISK_LENGTH;
-        pixelCoord += ivec2(getPoissonDisk(index) * 1.25);
-    #endif
-
+float fetchShadowTexel(ivec2 pixelCoord, float fragDepth) {
+    uint stored = texelFetch(shadowMapUint, pixelCoord, 0).r;
     #if SHADOW_TRANSPARENCY
-        int alphaDepth = int(texelFetch(shadowMap, pixelCoord, 0).r * SHADOW_COMBINED_MAX);
-        float depth = float(alphaDepth & SHADOW_DEPTH_MAX) / SHADOW_DEPTH_MAX;
-        float alpha = 1 - float(alphaDepth >> SHADOW_DEPTH_BITS) / SHADOW_ALPHA_MAX;
-        return depth < fragDepth ? alpha : 0.f;
+        // 24-bit depth in lower bits, 8-bit (1 - opacity) packed in upper bits.
+        uint depthBits = stored & 0x00FFFFFFu;
+        uint alphaBits = stored >> 24;
+        float depth = float(depthBits) / 16777215.0;   // 2^24 - 1
+        float alpha = 1.0 - float(alphaBits) / 255.0;
+        return depth < fragDepth ? alpha : 0.0;
     #else
-        return texelFetch(shadowMap, pixelCoord, 0).r < fragDepth ? 1.f : 0.f;
+        // 32-bit depth (scale matches the shadow_frag write side: 2^32 - 256).
+        float depth = float(stored) / 4294967040.0;
+        return depth < fragDepth ? 1.0 : 0.0;
     #endif
 }
 
@@ -92,6 +92,29 @@ float sampleShadowMap(vec3 fragPos, vec2 distortion, float lightDotNormals) {
     float shadowBias = MIN_SHADOW_BIAS * max(1, 1.0 - lightDotNormals);
     float fragDepth = shadowPos.z + shadowBias;
 
+    #if SHADOW_FILTERING == SHADOW_FILTERING_DITHER
+    {
+        // Rotated Poisson PCF: per-fragment rotation decorrelates tap patterns
+        // across neighboring fragments, producing soft noisy penumbra without
+        // visible structure. World-position hash keeps the rotation stable
+        // across camera motion, so the noise doesn't shimmer.
+        float angle = hash(fragPos.xyz) * TAU;
+        float ca = cos(angle), sa = sin(angle);
+        mat2 rot = mat2(ca, -sa, sa, ca);
+
+        const int taps = 16;
+        const float diskRadius = 4.0; // shadow-map texels
+        float shadow = 0.0;
+        for (int i = 0; i < taps; i++) {
+            vec2 offset = rot * getPoissonDisk(i) * diskRadius;
+            ivec2 tapCoord = ivec2(shadowPos.xy + offset);
+            shadow += fetchShadowTexel(tapCoord, fragDepth);
+        }
+        shadow /= float(taps);
+        return shadow * (1 - fadeOut);
+    }
+    #endif
+
     const int kernelSize = 3;
     ivec2 kernelOffset = ivec2(shadowPos.xy - kernelSize / 2);
     #if SHADOW_FILTERING == SHADOW_FILTERING_AVERAGE
@@ -104,10 +127,10 @@ float sampleShadowMap(vec3 fragPos, vec2 distortion, float lightDotNormals) {
     #endif
 
     // Sample 4 corners first
-    float c00 = fetchShadowTexel(kernelOffset + ivec2(0, 0), fragDepth, fragPos, 0);
-    float c02 = fetchShadowTexel(kernelOffset + ivec2(0, kernelSize - 1), fragDepth, fragPos, 1);
-    float c20 = fetchShadowTexel(kernelOffset + ivec2(kernelSize - 1, 0), fragDepth, fragPos, 2);
-    float c22 = fetchShadowTexel(kernelOffset + ivec2(kernelSize - 1, kernelSize - 1), fragDepth, fragPos, 3);
+    float c00 = fetchShadowTexel(kernelOffset + ivec2(0, 0), fragDepth);
+    float c02 = fetchShadowTexel(kernelOffset + ivec2(0, kernelSize - 1), fragDepth);
+    float c20 = fetchShadowTexel(kernelOffset + ivec2(kernelSize - 1, 0), fragDepth);
+    float c22 = fetchShadowTexel(kernelOffset + ivec2(kernelSize - 1, kernelSize - 1), fragDepth);
 
     // Early exit if all corners are the same (fully shadowed or fully lit)
     bool allShadowed = (c00 == 0.0 && c02 == 0.0 && c20 == 0.0 && c22 == 0.0);
@@ -118,11 +141,11 @@ float sampleShadowMap(vec3 fragPos, vec2 distortion, float lightDotNormals) {
         shadow = (c00 + c02 + c20 + c22) * 0.25;
     } else {
         // Finish sampling the reset of the kernal
-        float s01 = fetchShadowTexel(kernelOffset + ivec2(0, 1), fragDepth, fragPos, 4);
-        float s10 = fetchShadowTexel(kernelOffset + ivec2(1, 0), fragDepth, fragPos, 5);
-        float s11 = fetchShadowTexel(kernelOffset + ivec2(1, 1), fragDepth, fragPos, 6);
-        float s12 = fetchShadowTexel(kernelOffset + ivec2(1, 2), fragDepth, fragPos, 7);
-        float s21 = fetchShadowTexel(kernelOffset + ivec2(2, 1), fragDepth, fragPos, 8);
+        float s01 = fetchShadowTexel(kernelOffset + ivec2(0, 1), fragDepth);
+        float s10 = fetchShadowTexel(kernelOffset + ivec2(1, 0), fragDepth);
+        float s11 = fetchShadowTexel(kernelOffset + ivec2(1, 1), fragDepth);
+        float s12 = fetchShadowTexel(kernelOffset + ivec2(1, 2), fragDepth);
+        float s21 = fetchShadowTexel(kernelOffset + ivec2(2, 1), fragDepth);
 
         #if SHADOW_FILTERING == SHADOW_FILTERING_AVERAGE
             shadow =

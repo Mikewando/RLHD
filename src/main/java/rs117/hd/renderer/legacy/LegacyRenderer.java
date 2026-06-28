@@ -1090,6 +1090,8 @@ public class LegacyRenderer implements Renderer {
 				glBindFramebuffer(GL_FRAMEBUFFER, plugin.fboShadowMap);
 				glClearDepth(1);
 				glClear(GL_DEPTH_BUFFER_BIT);
+				// 0xFFFFFFFF in the R32UI color attachment = "no occluder".
+				glClearBufferuiv(GL_COLOR, 0, new int[] { -1, -1, -1, -1 });
 				glDepthFunc(GL_LEQUAL);
 
 				shadowProgram.use();

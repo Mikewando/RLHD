@@ -445,6 +445,13 @@ public class ZoneRenderer implements Renderer {
 				final float[][] volumeCorners = directionalShadowCasterVolume
 					.build(sceneCamera, drawDistance * LOCAL_TILE_SIZE, shadowDrawDistance);
 
+				// Keep world-space copies of the corners — the loop below transforms
+				// `volumeCorners` in place into light space, but the tight-far fit
+				// needs to re-transform them through the *positioned* light camera.
+				final float[][] worldCorners = new float[volumeCorners.length][3];
+				for (int i = 0; i < volumeCorners.length; i++)
+					System.arraycopy(volumeCorners[i], 0, worldCorners[i], 0, 3);
+
 				final float[] sceneCenter = new float[3];
 				for (float[] corner : volumeCorners)
 					add(sceneCenter, sceneCenter, corner);
@@ -497,8 +504,26 @@ public class ZoneRenderer implements Renderer {
 				sceneCenter[1] = (float) floor(sceneCenter[1] / texelSize + 0.5f) * texelSize;
 
 				directionalCamera.setPosition(directionalCamera.inverseTransformPoint(sceneCenter, sceneCenter));
+
+				// A5: tighten the far plane only. Re-transform the world-space
+				// corners through the now-positioned light camera and use the
+				// actual farthest depth (plus one tile of margin, ceiling-snapped
+				// to LOCAL_TILE_SIZE quanta so small camera movements don't shift
+				// the plane and shimmer the shadows). The conservative near
+				// (`radius * 0.05`) stays so that tall off-frustum casters
+				// (walls, trees) projecting to small light-space depth aren't
+				// clipped out of the shadow map.
+				float depthFarthest = Float.NEGATIVE_INFINITY;
+				float[] tmp = new float[3];
+				for (float[] worldCorner : worldCorners) {
+					directionalCamera.transformPoint(tmp, worldCorner);
+					depthFarthest = max(depthFarthest, abs(tmp[2]));
+				}
+				float quantum = LOCAL_TILE_SIZE;
+				float tightFar = (float) Math.ceil((depthFarthest + quantum) / quantum) * quantum;
+
 				directionalCamera.setNearPlane(Math.max(0.1f, radius * 0.05f));
-				directionalCamera.setFarPlane(radius * 2.0f);
+				directionalCamera.setFarPlane(tightFar);
 				directionalCamera.setZoom(1.0f);
 				directionalCamera.setViewportWidth(directionalSize);
 				directionalCamera.setViewportHeight(directionalSize);
@@ -773,6 +798,9 @@ public class ZoneRenderer implements Renderer {
 
 			glClearDepth(1);
 			glClear(GL_DEPTH_BUFFER_BIT);
+			// 0xFFFFFFFF — receivers interpret this as "very far / fully open"
+			// so any pixel that nothing rasterizes over reads as no occluder.
+			glClearBufferuiv(GL_COLOR, 0, new int[] { -1, -1, -1, -1 });
 			shouldClearShadowFbo = false;
 		}
 

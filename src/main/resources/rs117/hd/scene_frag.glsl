@@ -43,6 +43,7 @@
 
 uniform sampler2DArray textureArray;
 uniform sampler2D shadowMap;
+uniform usampler2D shadowMapUint;
 uniform usampler2DArray tiledLightingArray;
 
 // general HD settings
