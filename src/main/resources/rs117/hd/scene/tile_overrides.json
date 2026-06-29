@@ -1346,9 +1346,7 @@
       "WINTER_JAGGED_STONE_TILE_LIGHT": "season == SeasonalTheme.WINTER",
       "EDGEVILLE_BANK_WINDOW_FIX_UNBLEND": "!blendingColors"
     },
-    "blended": false,
-    "minLightness": 29,
-    "maxLightness": 30
+    "blended": false
   },
   {
     "name": "EDGEVILLE_BANK_WINDOW_FIX_UNBLEND",
@@ -8113,7 +8111,6 @@
     "name": "EDGEVILLE_PATH_OVERLAY_48",
     "area": "EDGEVILLE_PATH_OVERLAY",
     "replacements": {
-      "EDGEVILLE_PATH_OVERLAY_48_CUSTOM_PATH": "blendingColors",
       "WINTER_GRASS": "season == SeasonalTheme.WINTER",
       "DEFAULT_GRASS": true
     }
