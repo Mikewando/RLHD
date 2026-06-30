@@ -1500,15 +1500,6 @@ public class HdPlugin extends Plugin {
 			return;
 		}
 
-		// Create and bind the FBO
-		fboShadowMap = glGenFramebuffers();
-		glBindFramebuffer(GL_FRAMEBUFFER, fboShadowMap);
-
-		// Create texture
-		texShadowMap = glGenTextures();
-		glActiveTexture(TEXTURE_UNIT_SHADOW_MAP);
-		glBindTexture(GL_TEXTURE_2D, texShadowMap);
-
 		shadowMapResolution = config.shadowResolution().getValue();
 		int maxResolution = glGetInteger(GL_MAX_TEXTURE_SIZE);
 		if (maxResolution < shadowMapResolution) {
@@ -1516,29 +1507,25 @@ public class HdPlugin extends Plugin {
 			shadowMapResolution = maxResolution;
 		}
 
-		glTexImage2D(
-			GL_TEXTURE_2D,
-			0,
-			GL_DEPTH_COMPONENT24,
-			shadowMapResolution,
-			shadowMapResolution,
-			0,
-			GL_DEPTH_COMPONENT,
-			GL_FLOAT,
-			0
-		);
+		fboShadowMap = glGenFramebuffers();
+		glBindFramebuffer(GL_FRAMEBUFFER, fboShadowMap);
+
+		texShadowMap = glGenTextures();
+		glActiveTexture(TEXTURE_UNIT_SHADOW_MAP);
+		glBindTexture(GL_TEXTURE_2D, texShadowMap);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, shadowMapResolution, shadowMapResolution, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-
 		float[] color = { 1, 1, 1, 1 };
 		glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, color);
 
 		// R32UI color attachment — receivers sample this for lossless 32-bit
 		// depth (or 24-bit depth + 8-bit packed (1 - opacity) under
-		// SHADOW_TRANSPARENCY). The depth attachment above is kept only for
-		// hardware depth-test ordering inside the shadow pass.
+		// SHADOW_TRANSPARENCY). The depth attachment above is kept for the
+		// jittered-PCF filtering mode and hardware depth-test ordering inside
+		// the shadow pass.
 		texShadowDepthUint = glGenTextures();
 		glActiveTexture(TEXTURE_UNIT_SHADOW_MAP_UINT);
 		glBindTexture(GL_TEXTURE_2D, texShadowDepthUint);
@@ -1550,13 +1537,11 @@ public class HdPlugin extends Plugin {
 		int[] uintBorder = { -1, -1, -1, -1 }; // 0xFFFFFFFF — clear/border = "far / fully open".
 		glTexParameterIiv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, uintBorder);
 
-		// Bind textures
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texShadowMap, 0);
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texShadowDepthUint, 0);
 		glDrawBuffers(new int[] { GL_COLOR_ATTACHMENT0 });
 		glReadBuffer(GL_NONE);
 
-		// Reset FBO
 		glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
 	}
 

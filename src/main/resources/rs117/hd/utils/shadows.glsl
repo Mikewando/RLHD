@@ -45,6 +45,22 @@
 #endif
 
 #if SHADOW_MODE != SHADOW_MODE_OFF
+// Raw SM (depth, alpha) decode. Alpha is 1.0 in opaque mode; in transparency
+// mode it's the texel's blocker opacity (1 = fully blocks, 0 = fully clear).
+// Used by SHADOW_FILTERING_JITTERED_PCF's transparency path, which needs the
+// real depth (the depth attachment carries a packed sort key in transparency
+// mode) and per-texel alpha for soft-compared PCF accumulation.
+vec2 fetchShadowDepthAlpha(ivec2 pixelCoord) {
+    uint stored = texelFetch(shadowMapUint, pixelCoord, 0).r;
+    #if SHADOW_TRANSPARENCY
+        uint depthBits = stored & 0x00FFFFFFu;
+        uint alphaBits = stored >> 24;
+        return vec2(float(depthBits) / 16777215.0, 1.0 - float(alphaBits) / 255.0);
+    #else
+        return vec2(float(stored) / 4294967040.0, 1.0);
+    #endif
+}
+
 float fetchShadowTexel(ivec2 pixelCoord, float fragDepth) {
     uint stored = texelFetch(shadowMapUint, pixelCoord, 0).r;
     #if SHADOW_TRANSPARENCY
@@ -60,6 +76,97 @@ float fetchShadowTexel(ivec2 pixelCoord, float fragDepth) {
         return depth < fragDepth ? 1.0 : 0.0;
     #endif
 }
+
+#if SHADOW_FILTERING == SHADOW_FILTERING_JITTERED_PCF
+// Stochastic PCF with a soft depth compare.
+//
+// Structurally a PCF kernel with N XY-jittered taps at a single reference
+// depth, soft-compared per tap and averaged across taps. Differs from the
+// SMOOTH/PIXELATED 3x3 filters in three ways that together hide the SM
+// triangulation artifacts and remove the MIN_SHADOW_BIAS acne/peter-panning
+// tradeoff: (1) wider sample footprint (±xyJitterTexels vs. ~1 texel for
+// SMOOTH's bilinear tent), (2) smoothstep-based soft compare instead of
+// hard binary compare, giving anti-aliased edges, and (3) a slope-scaled
+// start offset along lightDir applied in sampleJitteredPCF() that replaces
+// MIN_SHADOW_BIAS so contact features (feet, crenelations) resolve.
+//
+// Opaque uses the depth attachment via texture() (GL_NEAREST — one texel
+// per tap); transparency uses the R32UI to recover the real depth + alpha
+// that transparency mode packs there (the depth attachment in that mode
+// carries a packed sort key, not real depth, see shadow_frag.glsl).
+float sampleJitteredPCFPass(vec3 origin, vec2 distortion, float jitter) {
+    const int   taps           = 16;
+    const float edgeWidth      = 0.0005; // soft band in normalized SM depth units
+    const float xyJitterTexels = 3.0;    // ±N texels of sub-pixel XY jitter per tap
+    const float invTaps        = 1.0 / float(taps);
+    ivec2 shadowRes    = textureSize(shadowMap, 0);
+    vec2  invShadowRes = 1.0 / vec2(shadowRes);
+
+    // Project the (already slope-offset) origin once. baseUv + refDepth are
+    // the receiver's "look here" coordinates in shadow NDC. The distortion
+    // term matches what sampleShadowMap applies for the other filter modes
+    // — used by water surfaces to animate the shadow with the flow map.
+    vec4 sp0 = lightProjectionMatrix * vec4(origin, 1);
+    sp0.xyz /= sp0.w;
+    if (any(greaterThan(abs(sp0.xyz), vec3(1.0))))
+        return 0.0;
+    vec2  baseUv   = sp0.xy * 0.5 + 0.5 + distortion;
+    float refDepth = sp0.z  * 0.5 + 0.5;
+
+    // Per-tap sub-texel XY jitter, irrational-sequence stratified (golden
+    // ratio for X, √2-1 for Y). Across 16 taps × 2 passes (the caller
+    // invokes us twice with anti-correlated jitter), 32 distinct sub-pixel
+    // positions span the ±xyJitterTexels disk.
+#define TAP_XY_JITTER(i) ((vec2( \
+        fract(jitter + float(i) * 0.61803398), \
+        fract(jitter * 1.3 + float(i) * 0.41421356) \
+    ) - 0.5) * (xyJitterTexels * 2.0 * invShadowRes))
+
+    float shadowSum = 0.0;
+    for (int i = 1; i <= taps; i++) {
+        vec2 uv = baseUv + TAP_XY_JITTER(i);
+
+#if SHADOW_TRANSPARENCY
+        // Tap contribution = softCov × per-texel alpha. Averaging across taps
+        // converges to the caster's true opacity for uniform partial-cover
+        // regions and gives PCF-style soft silhouettes at edges.
+        ivec2 pix = ivec2(uv * vec2(shadowRes));
+        vec2  sd  = fetchShadowDepthAlpha(pix);
+        float softCov = smoothstep(0.0, edgeWidth, refDepth - sd.x);
+        shadowSum += softCov * sd.y * invTaps;
+#else
+        // Opaque: depth attachment is real depth (transparency packs a sort
+        // key into it instead, which is why we read R32UI above).
+        float smDepth = texture(shadowMap, uv).r;
+        float softCov = smoothstep(0.0, edgeWidth, refDepth - smDepth);
+        shadowSum += softCov * invTaps;
+#endif
+    }
+    return shadowSum;
+#undef TAP_XY_JITTER
+}
+
+// Entry point: offsets the origin along lightDir to skirt receiver-surface
+// self-shadow (slope-scaled by 1/ndl so grazing angles get a larger
+// offset), then runs two stochastic-PCF passes with anti-correlated jitter
+// phases and averages them. Each pass already returns a continuous value;
+// the 2-pass average doubles the effective tap count for the same fragment,
+// reducing per-fragment jitter noise without increasing the disk radius.
+float sampleJitteredPCF(vec3 fragPos, vec2 distortion, float lightDotNormals) {
+    float ndl = max(lightDotNormals, 0.1);
+    // Small world-space offset (~few units at perpendicular, larger at
+    // grazing) along the sun direction. Replaces MIN_SHADOW_BIAS: receiver-
+    // surface taps land just above the receiver's own SM depth so the soft
+    // compare returns 0 for them, while real occluders' depth differences
+    // still pass.
+    vec3 origin = fragPos + lightDir * (2.0 / ndl);
+
+    float jitter = hash(fragPos.xyz);
+    float s0 = sampleJitteredPCFPass(origin, distortion, jitter);
+    float s1 = sampleJitteredPCFPass(origin, distortion, fract(jitter + 0.5));
+    return 0.5 * (s0 + s1);
+}
+#endif
 
 float sampleShadowMap(vec3 fragPos, vec2 distortion, float lightDotNormals) {
     if (lightStrength <= 0)
@@ -111,6 +218,13 @@ float sampleShadowMap(vec3 fragPos, vec2 distortion, float lightDotNormals) {
             shadow += fetchShadowTexel(tapCoord, fragDepth);
         }
         shadow /= float(taps);
+        return shadow * (1 - fadeOut);
+    }
+    #endif
+
+    #if SHADOW_FILTERING == SHADOW_FILTERING_JITTERED_PCF
+    {
+        float shadow = sampleJitteredPCF(fragPos, distortion, lightDotNormals);
         return shadow * (1 - fadeOut);
     }
     #endif
