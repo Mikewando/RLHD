@@ -483,7 +483,8 @@ public interface HdPluginConfig extends Config
 			"Filtering technique used when smoothing the edges of shadows.<br>" +
 			"'Smooth' smooths the shadow pixels evenly (PCF 3x3).<br>" +
 			"'Dithered' smooths out pixelation using dithering.<br>" +
-			"'Pixelated' retains slightly pixelated shadow edges.",
+			"'Pixelated' retains slightly pixelated shadow edges.<br>" +
+			"'Smoother' soft-compares against an XY-jittered stochastic PCF kernel to eliminate bias artifacts and anti-alias edges.",
 		position = 3,
 		section = shadowSettings
 	)
