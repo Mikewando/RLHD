@@ -191,6 +191,9 @@ public final class AsyncCachedModel extends Job implements Model {
 	public byte[] getFaceTransparencies() { return faceTransparencies.getValue(); }
 
 	@Override
+	public byte getTransparency() { return 0; }
+
+	@Override
 	public short[] getFaceTextures() { return faceTextures.getValue(); }
 
 	public synchronized boolean setup(Model model) {
