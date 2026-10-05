@@ -38,6 +38,8 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.time.ZoneOffset;
@@ -46,6 +48,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -2393,6 +2396,66 @@ public class HdPlugin extends Plugin {
 			return;
 
 		fishingSpotReplacer.update();
+	}
+
+	// TEMPORARY, unrelated to 117HD: mute the Sailing boat wind ambient loop (sound 11141) without muting
+	// salvaging. Boat ambient sounds live in the boat WorldView's deque, which the RuneLite API doesn't expose,
+	// so the node is unlinked via reflection. Remove once RuneLite can mute non-top-level ambient sounds.
+	private static final Set<Integer> MUTED_AMBIENT_SOUND_IDS = Set.of(11141);
+	private static Field[] ambientNodeLinkFields;
+
+	@Subscribe
+	public void onAmbientSoundEffectCreated(AmbientSoundEffectCreated event) {
+		AmbientSoundEffect effect = event.getAmbientSoundEffect();
+		if (MUTED_AMBIENT_SOUND_IDS.contains(effect.getSoundEffectId()))
+			unlinkNode((Node) effect);
+	}
+
+	private static boolean unlinkNode(Node node) {
+		try {
+			if (ambientNodeLinkFields == null) {
+				// The base class implementing Node holds two self-typed fields: the next and previous links
+				Class<?> nodeClass = node.getClass();
+				while (nodeClass != null && !Arrays.asList(nodeClass.getInterfaces()).contains(Node.class))
+					nodeClass = nodeClass.getSuperclass();
+				if (nodeClass == null)
+					throw new IllegalStateException("No Node base class for " + node.getClass());
+				List<Field> links = new ArrayList<>();
+				for (Field f : nodeClass.getDeclaredFields()) {
+					if (!Modifier.isStatic(f.getModifiers()) && f.getType() == nodeClass) {
+						f.setAccessible(true);
+						links.add(f);
+					}
+				}
+				if (links.size() != 2)
+					throw new IllegalStateException("Expected 2 link fields, found " + links);
+				ambientNodeLinkFields = links.toArray(Field[]::new);
+			}
+
+			Node next = node.getNext();
+			Node prev = node.getPrevious();
+			if (next == null || prev == null)
+				return false;
+
+			// Work out which field is which via the API getters. When next == prev, either assignment is correct
+			Field nextField = ambientNodeLinkFields[0];
+			Field prevField = ambientNodeLinkFields[1];
+			if (nextField.get(node) != next) {
+				nextField = ambientNodeLinkFields[1];
+				prevField = ambientNodeLinkFields[0];
+			}
+			if (nextField.get(node) != next || prevField.get(node) != prev)
+				throw new IllegalStateException("Link fields don't match getNext/getPrevious");
+
+			nextField.set(prev, next);
+			prevField.set(next, prev);
+			nextField.set(node, null);
+			prevField.set(node, null);
+			return true;
+		} catch (Exception ex) {
+			log.warn("Failed to unlink ambient sound", ex);
+			return false;
+		}
 	}
 
 	@Subscribe
