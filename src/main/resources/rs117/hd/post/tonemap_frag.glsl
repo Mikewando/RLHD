@@ -64,5 +64,12 @@ void main() {
         srgb = windowsHdrCorrection(srgb);
     #endif
 
+    // Dither the 8-bit display output with ±1 LSB triangular noise, since smooth
+    // dark gradients (night skies, fog) otherwise band visibly. Fade it out at
+    // the ends of the range so pure black and white stay noise-free.
+    srgb = clamp(srgb, 0.0, 1.0);
+    vec3 dither = hash32(gl_FragCoord.xy) - hash32(gl_FragCoord.xy + 71.37);
+    srgb += dither * min(vec3(1.0), min(srgb, 1.0 - srgb) * 255.0) / 255.0;
+
     FragColor = vec4(srgb, 1.0);
 }
