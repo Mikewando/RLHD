@@ -88,8 +88,10 @@ vec3 agxInverseTonemap(vec3 targetDisplayLinear) {
     v = agxInverseLookPunchy(v);
     for (int i = 0; i < 3; i++)
         v[i] = exp2(uboGlobal.agxMinEv + agxInverseSigmoid(v[i]) * (uboGlobal.agxMaxEv - uboGlobal.agxMinEv));
+    // Saturated targets (e.g. sunset orange) can require slightly negative scene RGB.
+    // Keep it: agxTonemap accepts negatives, so clamping here would shift the hue.
     vec3 scene = AGX_OUTPUT_MATRIX * v;
-    return max(scene, vec3(0.0)) / max(uboGlobal.exposure, 1e-6);
+    return scene / max(uboGlobal.exposure, 1e-6);
 }
 
 // Inverse of tonemap_frag's luminance-scaled hard-clip legacy target.
@@ -113,10 +115,9 @@ vec3 agxInverseForDisplay(vec3 targetDisplayLinear) {
 }
 
 vec3 agxTonemap(vec3 hdr) {
-    // Guard against negatives that would break the log
-    hdr = max(hdr, vec3(0.0));
-
-    // Move to AgX color space
+    // Move to AgX color space. Negative channels are left in: the input matrix
+    // pulls slightly out-of-gamut colors back in, and agxInverseTonemap relies on
+    // this to reach saturated targets. The max below still guards the log.
     vec3 v = AGX_INPUT_MATRIX * hdr;
 
     // Log2 encode with AgX EV range (from UBO uniforms), mapped to [0,1]

@@ -223,13 +223,11 @@ public class ColorUtils {
 	 * AgX tonemap with the given EV range, exposure, and punchy parameters,
 	 * displays approximately as the given target linear color. Inverse follows:
 	 *   v = INPUT_MATRIX * target → invPunchy → invSigmoid per channel →
-	 *   denormalize → 2^ → scene = OUTPUT_MATRIX * v → clamp ≥0 → /exposure.
+	 *   denormalize → 2^ → scene = OUTPUT_MATRIX * v → /exposure.
 	 *
-	 * The clamp at the end is because AgX's gamut after the matrix dance can
-	 * require negative scene-RGB to hit highly saturated targets, but AgX's
-	 * own max(hdr, 0) discards negatives — so we can't actually hit those.
-	 * The returned value is the closest achievable in the non-negative gamut;
-	 * the actual displayed sky may be slightly desaturated vs. the target.
+	 * Highly saturated targets can require slightly negative scene RGB. These are
+	 * kept rather than clamped, since the shader's agxTonemap accepts negatives
+	 * (its input matrix brings them back into gamut), making the round trip exact.
 	 */
 	public static float[] agxInverseToHdrInput(
 		float[] targetDisplayLinear,
@@ -248,7 +246,7 @@ public class ColorUtils {
 		}
 		float[] scene = agxMat3MulVec(AGX_OUTPUT_MATRIX_ROWS, v);
 		float invExp = 1f / Math.max(exposure, 1e-6f);
-		for (int i = 0; i < 3; i++) scene[i] = Math.max(scene[i], 0f) * invExp;
+		for (int i = 0; i < 3; i++) scene[i] *= invExp;
 		return scene;
 	}
 
