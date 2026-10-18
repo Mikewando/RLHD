@@ -34,6 +34,12 @@
 #if SHADOW_FILTERING == SHADOW_FILTERING_PCSS
     #include <utils/shadow_pcss.glsl>
     #define sampleShadow sampleShadowPCSS
+#elif SHADOW_FILTERING == SHADOW_FILTERING_POISSON_DITHER
+    #define sampleShadow sampleShadowPoissonDither
+    #define sampleHardwareShadow sampleHardwareShadow2x2
+#elif SHADOW_FILTERING == SHADOW_FILTERING_JITTERED_PCF
+    // sampleShadowMap calls sampleShadowJitteredPCF directly, since it needs the surface normal
+    #define sampleHardwareShadow sampleHardwareShadow2x2
 #elif SHADOW_FILTERING_KERNEL == 3
     #define sampleShadow sampleShadowPCF3x3
     #define sampleHardwareShadow sampleHardwareShadow3x3
@@ -116,7 +122,11 @@ float sampleShadowMap(
         MODEL_SHADOW_BIAS_LIMIT / depthRange
     );
 
-    float shadow = sampleShadow(shadowMap, SHADOW_TRANSPARENCY == 1, receiver, fragPos, shadowPos);
+    #if SHADOW_FILTERING == SHADOW_FILTERING_JITTERED_PCF
+        float shadow = sampleShadowJitteredPCF(fragPos, dot(surfaceNormal, uboGlobal.lightDir), preventSelfShadowing);
+    #else
+        float shadow = sampleShadow(shadowMap, SHADOW_TRANSPARENCY == 1, receiver, fragPos, shadowPos);
+    #endif
 
     #if TERRAIN_SHADOWS
         if (shadow < 1.0) {

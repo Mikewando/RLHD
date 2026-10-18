@@ -175,6 +175,7 @@ public class HdPlugin extends Plugin {
 	public static final int TEXTURE_UNIT_UI = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_GAME = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_SHADOW_MAP = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
+	public static final int TEXTURE_UNIT_SHADOW_MAP_UINT = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_TERRAIN_SHADOW_MAP = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_TILE_HEIGHT_MAP = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
 	public static final int TEXTURE_UNIT_TILED_LIGHTING_MAP = GL_TEXTURE0 + TEXTURE_UNIT_COUNT++;
@@ -413,6 +414,7 @@ public class HdPlugin extends Plugin {
 	public int shadowMapResolution;
 	public int fboShadowMap;
 	private int texShadowMap;
+	private int texShadowDepthUint;
 
 	public int terrainShadowMapResolution;
 	public int fboTerrainShadowMap;
@@ -1625,9 +1627,24 @@ public class HdPlugin extends Plugin {
 		float[] color = { 1, 1, 1, 1 };
 		glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, color);
 
-		// Bind texture
+		// R32UI color attachment — the POISSON_DITHER and JITTERED_PCF filtering modes sample
+		// this for lossless 32-bit depth (or 24-bit depth + 8-bit packed (1 - opacity) under
+		// SHADOW_TRANSPARENCY), since the depth attachment is only 16-bit for opaque shadows.
+		texShadowDepthUint = glGenTextures();
+		glActiveTexture(TEXTURE_UNIT_SHADOW_MAP_UINT);
+		glBindTexture(GL_TEXTURE_2D, texShadowDepthUint);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, shadowMapResolution, shadowMapResolution, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, (ByteBuffer) null);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+		int[] uintBorder = { -1, -1, -1, -1 }; // 0xFFFFFFFF — clear/border = "far / fully open"
+		glTexParameterIiv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, uintBorder);
+
+		// Bind textures
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texShadowMap, 0);
-		glDrawBuffer(GL_NONE);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texShadowDepthUint, 0);
+		glDrawBuffers(new int[] { GL_COLOR_ATTACHMENT0 });
 		glReadBuffer(GL_NONE);
 
 		// Create terrain shadow map FBO and texture
@@ -1685,6 +1702,15 @@ public class HdPlugin extends Plugin {
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 
+		texShadowDepthUint = glGenTextures();
+		glActiveTexture(TEXTURE_UNIT_SHADOW_MAP_UINT);
+		glBindTexture(GL_TEXTURE_2D, texShadowDepthUint);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, 1, 1, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, (ByteBuffer) null);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
 		initializeDummyTerrainShadowMap();
 	}
 
@@ -1703,6 +1729,10 @@ public class HdPlugin extends Plugin {
 		if (texShadowMap != 0)
 			glDeleteTextures(texShadowMap);
 		texShadowMap = 0;
+
+		if (texShadowDepthUint != 0)
+			glDeleteTextures(texShadowDepthUint);
+		texShadowDepthUint = 0;
 
 		if (fboShadowMap != 0)
 			glDeleteFramebuffers(fboShadowMap);

@@ -504,7 +504,9 @@ public interface HdPluginConfig extends Config
 			"'Dithered low' smooths out pixelation using dithering.<br>" +
 			"'Dithered high' smooths out pixelation using dithering (PCF 2x2).<br>" +
 			"'Pixelated' retains slightly pixelated shadow edges.<br>" +
-			"'Soft shadows' produces realistically soft shadows, at the cost of performance.",
+			"'Soft shadows' produces realistically soft shadows, at the cost of performance.<br>" +
+			"'Dithered (Poisson)' smooths edges with a per-fragment rotated 16-tap Poisson disk.<br>" +
+			"'Smoother' soft-compares against an XY-jittered stochastic PCF kernel to eliminate bias artifacts and anti-alias edges.",
 		position = 3,
 		section = shadowSettings
 	)

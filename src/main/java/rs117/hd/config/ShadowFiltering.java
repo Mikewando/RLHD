@@ -10,9 +10,12 @@ public enum ShadowFiltering {
 	DITHERED_LOW("Dithered low", Mode.DITHER, 1),
 	DITHERED_HIGH("Dithered high", Mode.DITHER, 2),
 	PIXELATED("Pixelated", Mode.AVERAGE, 2),
-	PCSS("Soft shadows", Mode.PCSS, 2);
+	PCSS("Soft shadows", Mode.PCSS, 2),
+	POISSON_DITHER("Dithered (Poisson)", Mode.POISSON_DITHER, 2),
+	JITTERED_PCF("Smoother", Mode.JITTERED_PCF, 2);
 
-	public enum Mode { PCF, DITHER, AVERAGE, PCSS }
+	// Ordinals must match the SHADOW_FILTERING_* defines in constants.glsl
+	public enum Mode { PCF, DITHER, AVERAGE, PCSS, POISSON_DITHER, JITTERED_PCF }
 
 	private final String name;
 	public final Mode filtering;

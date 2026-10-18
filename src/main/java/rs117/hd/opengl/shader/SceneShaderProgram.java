@@ -6,6 +6,7 @@ import static org.lwjgl.opengl.GL33C.*;
 import static rs117.hd.HdPlugin.TEXTURE_UNIT_GAME;
 import static rs117.hd.HdPlugin.TEXTURE_UNIT_NEBULA_MAP;
 import static rs117.hd.HdPlugin.TEXTURE_UNIT_SHADOW_MAP;
+import static rs117.hd.HdPlugin.TEXTURE_UNIT_SHADOW_MAP_UINT;
 import static rs117.hd.HdPlugin.TEXTURE_UNIT_TERRAIN_SHADOW_MAP;
 import static rs117.hd.HdPlugin.TEXTURE_UNIT_TILED_LIGHTING_MAP;
 import static rs117.hd.renderer.zone.ZoneRenderer.TEXTURE_UNIT_TEXTURED_FACES;
@@ -13,6 +14,7 @@ import static rs117.hd.renderer.zone.ZoneRenderer.TEXTURE_UNIT_TEXTURED_FACES;
 public class SceneShaderProgram extends ShaderProgram {
 	protected final UniformTexture uniTextureArray = addUniformTexture("textureArray");
 	protected final UniformTexture uniShadowMap = addUniformTexture("shadowMap");
+	protected final UniformTexture uniShadowMapUint = addUniformTexture("shadowMapUint");
 	protected final UniformTexture uniTerrainShadowMap = addUniformTexture("terrainShadowMap");
 	protected final UniformTexture uniTiledLightingTextureArray = addUniformTexture("tiledLightingArray");
 	protected final UniformTexture uniTextureFaces = addUniformTexture("textureFaces");
@@ -25,6 +27,8 @@ public class SceneShaderProgram extends ShaderProgram {
 		uniTiledLightingTextureArray.ignoreMissing = true;
 		uniTerrainShadowMap.ignoreMissing = true;
 		uniNebulaMap.ignoreMissing = true;
+		// Only read by the POISSON_DITHER and JITTERED_PCF filtering modes
+		uniShadowMapUint.ignoreMissing = true;
 	}
 
 	@Override
@@ -36,6 +40,7 @@ public class SceneShaderProgram extends ShaderProgram {
 	protected void initialize() {
 		uniTextureArray.set(TEXTURE_UNIT_GAME);
 		uniShadowMap.set(TEXTURE_UNIT_SHADOW_MAP);
+		uniShadowMapUint.set(TEXTURE_UNIT_SHADOW_MAP_UINT);
 		uniTerrainShadowMap.set(TEXTURE_UNIT_TERRAIN_SHADOW_MAP);
 		uniTiledLightingTextureArray.set(TEXTURE_UNIT_TILED_LIGHTING_MAP);
 		uniTextureFaces.set(TEXTURE_UNIT_TEXTURED_FACES);

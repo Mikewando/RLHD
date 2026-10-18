@@ -136,6 +136,125 @@ float sampleShadowPCF3x3(sampler2D tex, bool hasTransparency, ShadowReceiver rec
     return shadow * kernelAreaReciprocal;
 }
 
+#if SHADOW_FILTERING == SHADOW_FILTERING_POISSON_DITHER || SHADOW_FILTERING == SHADOW_FILTERING_JITTERED_PCF
+// Raw (depth, alpha) decode of the R32UI shadow attachment. Alpha is 1.0 in opaque mode; in
+// transparency mode it's the texel's blocker opacity (1 = fully blocks, 0 = fully clear).
+vec2 fetchShadowDepthAlpha(ivec2 texelPos) {
+    // texelFetch does not apply the texture's clamp-to-border setting
+    if (any(lessThan(texelPos, ivec2(0))) || any(greaterThanEqual(texelPos, textureSize(shadowMapUint, 0))))
+        return vec2(1.0, 0.0);
+    uint stored = texelFetch(shadowMapUint, texelPos, 0).r;
+    #if SHADOW_TRANSPARENCY
+        uint depthBits = stored & 0x00FFFFFFu;
+        uint alphaBits = stored >> 24;
+        return vec2(float(depthBits) / 16777215.0, 1.0 - float(alphaBits) / 255.0);
+    #else
+        return vec2(float(stored) / 4294967040.0, 1.0);
+    #endif
+}
+#endif
+
+#if SHADOW_FILTERING == SHADOW_FILTERING_POISSON_DITHER
+// Rotated Poisson PCF: per-fragment rotation decorrelates tap patterns
+// across neighboring fragments, producing soft noisy penumbra without
+// visible structure. World-position hash keeps the rotation stable
+// across camera motion, so the noise doesn't shimmer. Each tap uses the
+// receiver-plane depth at its offset, like the PCF kernels above.
+float sampleShadowPoissonDither(sampler2D tex, bool hasTransparency, ShadowReceiver receiver, vec3 fragPos, vec4 shadowPos) {
+    float angle = hash13(fragPos) * TAU;
+    float ca = cos(angle), sa = sin(angle);
+    mat2 rot = mat2(ca, -sa, sa, ca);
+
+    const int taps = 16;
+    const float diskRadius = 4.0; // shadow-map texels
+    float shadow = 0.0;
+    for (int i = 0; i < taps; i++) {
+        vec2 offset = rot * getPoissonDisk(i) * diskRadius;
+        ivec2 texelPos = ivec2(receiver.texelPos + offset);
+        float bias = dot(vec2(texelPos) + 0.5 - receiver.texelPos, receiver.depthPerTexel);
+        float fragDepth = receiver.depth + limitShadowBias(bias - receiver.bias, receiver.biasLimit);
+        vec2 depthAlpha = fetchShadowDepthAlpha(texelPos);
+        shadow += depthAlpha.x < fragDepth ? depthAlpha.y : 0.0;
+    }
+    return shadow / float(taps);
+}
+#endif
+
+#if SHADOW_FILTERING == SHADOW_FILTERING_JITTERED_PCF
+// Stochastic PCF with a soft depth compare.
+//
+// Structurally a PCF kernel with N XY-jittered taps at a single reference
+// depth, soft-compared per tap and averaged across taps. Differs from the
+// PCF kernels above in three ways that together hide the SM triangulation
+// artifacts and sidestep the acne/peter-panning tradeoff: (1) wider sample
+// footprint (±xyJitterTexels), (2) smoothstep-based soft compare instead of
+// a hard binary compare, giving anti-aliased edges, and (3) a slope-scaled
+// start offset along lightDir applied in sampleShadowJitteredPCF() instead
+// of the receiver-plane bias, so contact features (feet, crenelations) resolve.
+float sampleJitteredPCFPass(vec3 origin, float jitter) {
+    const int   taps           = 16;
+    const float edgeWidth      = 0.0005; // soft band in normalized SM depth units
+    const float xyJitterTexels = 3.0;    // ±N texels of sub-pixel XY jitter per tap
+    const float invTaps        = 1.0 / float(taps);
+    vec2 shadowRes    = vec2(textureSize(shadowMapUint, 0));
+    vec2 invShadowRes = 1.0 / shadowRes;
+
+    // Project the (already slope-offset) origin once. baseUv + refDepth are
+    // the receiver's "look here" coordinates in shadow NDC.
+    vec4 sp0 = uboGlobal.lightProjectionMatrix * vec4(origin, 1);
+    sp0.xyz /= sp0.w;
+    if (any(greaterThan(abs(sp0.xyz), vec3(1.0))))
+        return 0.0;
+    vec2  baseUv   = sp0.xy * 0.5 + 0.5;
+    float refDepth = sp0.z  * 0.5 + 0.5;
+
+    // Per-tap sub-texel XY jitter, irrational-sequence stratified (golden
+    // ratio for X, √2-1 for Y). Across 16 taps × 2 passes (the caller
+    // invokes us twice with anti-correlated jitter), 32 distinct sub-pixel
+    // positions span the ±xyJitterTexels disk.
+#define TAP_XY_JITTER(i) ((vec2( \
+        fract(jitter + float(i) * 0.61803398), \
+        fract(jitter * 1.3 + float(i) * 0.41421356) \
+    ) - 0.5) * (xyJitterTexels * 2.0 * invShadowRes))
+
+    float shadowSum = 0.0;
+    for (int i = 1; i <= taps; i++) {
+        vec2 uv = baseUv + TAP_XY_JITTER(i);
+        // Tap contribution = softCov × per-texel alpha. Averaging across taps
+        // converges to the caster's true opacity for uniform partial-cover
+        // regions and gives PCF-style soft silhouettes at edges.
+        vec2 depthAlpha = fetchShadowDepthAlpha(ivec2(uv * shadowRes));
+        float softCov = smoothstep(0.0, edgeWidth, refDepth - depthAlpha.x);
+        shadowSum += softCov * depthAlpha.y * invTaps;
+    }
+    return shadowSum;
+#undef TAP_XY_JITTER
+}
+
+// Entry point: offsets the origin along lightDir to skirt receiver-surface
+// self-shadow (slope-scaled by 1/ndl so grazing angles get a larger
+// offset), then runs two stochastic-PCF passes with anti-correlated jitter
+// phases and averages them. Each pass already returns a continuous value;
+// the 2-pass average doubles the effective tap count for the same fragment,
+// reducing per-fragment jitter noise without increasing the disk radius.
+float sampleShadowJitteredPCF(vec3 fragPos, float lightDotNormals, bool preventSelfShadowing) {
+    vec3 origin = fragPos;
+    if (preventSelfShadowing) {
+        float ndl = max(lightDotNormals, 0.1);
+        // Small world-space offset (~few units at perpendicular, larger at
+        // grazing) along the light direction. Receiver-surface taps land just
+        // above the receiver's own SM depth so the soft compare returns 0 for
+        // them, while real occluders' depth differences still pass.
+        origin += uboGlobal.lightDir * (2.0 / ndl);
+    }
+
+    float jitter = hash13(fragPos);
+    float s0 = sampleJitteredPCFPass(origin, jitter);
+    float s1 = sampleJitteredPCFPass(origin, fract(jitter + 0.5));
+    return 0.5 * (s0 + s1);
+}
+#endif
+
 float fetchHardwareShadowTexel(sampler2DShadow tex, ShadowReceiver receiver, int i, vec2 shadowPos) {
     vec2 texelPos = shadowPos * textureSize(tex, 0) + getShadowDitherOffset(i);
     float bias = dot(texelPos - receiver.texelPos, receiver.depthPerTexel);

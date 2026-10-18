@@ -48,6 +48,7 @@
 
 uniform sampler2DArray textureArray;
 uniform sampler2D shadowMap;
+uniform usampler2D shadowMapUint;
 #if TERRAIN_SHADOWS
     #if SHADOW_FILTERING == SHADOW_FILTERING_PCSS
         uniform sampler2D terrainShadowMap;
